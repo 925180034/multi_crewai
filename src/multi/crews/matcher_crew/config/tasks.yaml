@@ -1,0 +1,11 @@
+# src/multi/crews/matcher_crew/config/tasks.yaml
+match_schemas:
+  description: >
+    Analyze the provided data schemas and identify potential matches.
+    Consider semantic similarities, structural patterns, and data types.
+    Provide detailed mapping recommendations with confidence scores.
+    {retrieved_data}
+  expected_output: >
+    A detailed mapping describing the matches found between different schemas,
+    including confidence scores and reasoning for each match.
+  agent: schema_matcher_agent

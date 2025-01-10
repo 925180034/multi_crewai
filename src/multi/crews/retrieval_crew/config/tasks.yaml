@@ -1,0 +1,8 @@
+# src/multi/crews/retrieval_crew/config/tasks.yaml
+retrieve_data:
+  description: >
+    Based on the provided plan and query, retrieve relevant data from
+    appropriate sources. Process and format the data as needed.
+  expected_output: >
+    Retrieved and processed data relevant to the query.
+  agent: retrieval_agent

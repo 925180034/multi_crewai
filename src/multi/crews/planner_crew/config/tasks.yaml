@@ -1,0 +1,8 @@
+# src/multi/crews/planner_crew/config/tasks.yaml
+plan_execution:
+  description: >
+    Analyze the input query and create a detailed execution plan.
+    Consider what data needs to be accessed and how it should be processed.
+  expected_output: >
+    A structured plan describing the steps needed to execute the query.
+  agent: planner_agent
