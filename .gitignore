@@ -2,3 +2,7 @@
 __pycache__/
 lib/
 uv.lock
+documents
+db
+index_storage
+outputs

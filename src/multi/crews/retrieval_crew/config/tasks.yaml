@@ -1,8 +1,28 @@
-# src/multi/crews/retrieval_crew/config/tasks.yaml
-retrieve_data:
+search_database:
   description: >
-    Based on the provided plan and query, retrieve relevant data from
-    appropriate sources. Process and format the data as needed.
+    Search the database for relevant information based on the query.
+    Consider the data structure and relationships when searching.
+    Query: {query}
+    Plan: {plan}
   expected_output: >
-    Retrieved and processed data relevant to the query.
-  agent: retrieval_agent
+    Retrieved database information formatted in a clear and structured way,
+    including context and relationships.
+  agent: database_agent
+
+search_web:
+  description: >
+    Search the web for relevant information related to the query.
+    Query: {query}
+    Plan: {plan}
+  expected_output: >
+    Relevant web search results organized in a clear format.
+  agent: web_agent
+
+search_documents:
+  description: >
+    Search through available documents for relevant information.
+    Query: {query}
+    Plan: {plan}
+  expected_output: >
+    Extracted document information with source references.
+  agent: document_agent

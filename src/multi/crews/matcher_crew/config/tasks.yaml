@@ -1,11 +1,10 @@
-# src/multi/crews/matcher_crew/config/tasks.yaml
 match_schemas:
   description: >
-    Analyze the provided data schemas and identify potential matches.
-    Consider semantic similarities, structural patterns, and data types.
-    Provide detailed mapping recommendations with confidence scores.
-    {retrieved_data}
+    Analyze the retrieved data and match schemas.
+    Query: {query}
+    Database Data: {db_data}
+    Web Data: {web_data}  
+    Document Data: {doc_data}
   expected_output: >
-    A detailed mapping describing the matches found between different schemas,
-    including confidence scores and reasoning for each match.
-  agent: schema_matcher_agent
+    Matched schemas and relationships between different data sources.
+  agent: schema_matcher  # 这个需要与agents.yaml中的名称匹配

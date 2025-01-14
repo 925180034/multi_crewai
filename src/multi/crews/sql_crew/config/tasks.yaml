@@ -1,14 +1,8 @@
-# src/multi/crews/sql_crew/config/tasks.yaml
 generate_sql:
   description: >
-    Using the provided query, schema matches, and other context information,
-    generate an appropriate SQL statement.
-    Consider query optimization and best practices.
-    Input Information:
+    Generate SQL query based on the analyzed requirements and schema matches.
     Query: {query}
-    Schema Matches: {schema_matches}
-    Retrieved Data: {retrieved_data}
+    Schema matches: {schema_matches}
   expected_output: >
-    A valid and optimized SQL statement that correctly addresses the original query,
-    along with explanations of key decisions made in the query construction.
-  agent: sql_generator_agent
+    A valid SQL query that retrieves the requested information.
+  agent: sql_generator_agent  # 必须和agents.yaml中的名字一致

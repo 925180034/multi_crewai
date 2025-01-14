@@ -1,8 +1,39 @@
-# src/multi/crews/retrieval_crew/config/agents.yaml
-retrieval_agent:
-  role: Data Retrieval Agent
-  goal: Efficiently retrieve and process data from various sources
+database_agent:
+  role: Database Information Retriever
+  goal: Retrieve and analyze information from databases efficiently
   backstory: >
-    You are a specialist in accessing and processing data from both structured
-    and unstructured sources. You know how to handle different data formats
-    and integrate information effectively.
+    You are an expert at querying databases and understanding data structures.
+    You excel at extracting relevant information from complex database systems.
+  max_iter: 2  # 限制最大迭代次数
+  max_rpm: 10  # 限制API请求频率
+  max_execution_time: 300  # 限制执行时间为5分钟
+  verbose: true
+  allow_delegation: false 
+
+web_agent:
+  role: Web Information Retriever
+  goal: Search and extract relevant information from the internet
+  backstory: >
+    You are a skilled web researcher capable of finding and analyzing online 
+    information efficiently and effectively.
+  max_iter: 1
+  verbose: True
+
+document_agent:
+  role: Document Information Retriever
+  goal: Extract and analyze information from various document formats
+  backstory: >
+    You specialize in processing and analyzing different types of documents.
+    You understand document structures and can effectively extract information
+  max_iter: 2
+  verbose: True
+
+manager_agent:
+  role: Information Retrieval Manager
+  goal: Determine the best source of information based on the query
+  backstory: >
+    You are an expert at understanding queries and determining the most appropriate 
+    data sources. You analyze queries and decide whether to search databases, 
+    documents, or the web based on the query context and requirements.
+  max_iter: 2
+  verbose: True
