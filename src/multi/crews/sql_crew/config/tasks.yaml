@@ -5,4 +5,4 @@ generate_sql:
     Schema matches: {schema_matches}
   expected_output: >
     A valid SQL query that retrieves the requested information.
-  agent: sql_generator_agent  # 必须和agents.yaml中的名字一致
+  agent: sql_generator_agent  

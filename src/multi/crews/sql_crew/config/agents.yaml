@@ -1,4 +1,4 @@
-sql_generator_agent:  # 确保这个名字存在
+sql_generator_agent:  
   role: SQL Generator
   goal: Generate SQL queries based on matched schemas
   backstory: >

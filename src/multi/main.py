@@ -119,6 +119,29 @@ class QueryFlow(Flow[QueryState]):
         except Exception as e:
             logger.error(f"Error saving crew output: {str(e)}")
 
+    # @start()
+    # def process_query(self):
+    #     """处理初始查询"""
+    #     try:
+    #         self._initialize_crews()
+            
+    #         self.state.query = """
+    #         查找所有患者中最近一次就诊诊断为糖尿病的记录，包括：
+    #         1. 患者的基本信息
+    #         2. 就诊的具体诊断内容
+    #         3. 相关的用药建议
+    #         并结合治疗指南提供用药参考。
+    #         """
+            
+    #         # 保存初始查询
+    #         with open(self.output_dir / f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f:
+    #             json.dump({"query": self.state.query}, f, ensure_ascii=False, indent=2)
+                
+    #         logger.info("Initial query processed")
+    #     except Exception as e:
+    #         logger.error(f"Error processing query: {str(e)}")
+    #         raise
+
     @start()
     def process_query(self):
         """处理初始查询"""
@@ -126,11 +149,11 @@ class QueryFlow(Flow[QueryState]):
             self._initialize_crews()
             
             self.state.query = """
-            查找所有患者中最近一次就诊诊断为糖尿病的记录，包括：
-            1. 患者的基本信息
-            2. 就诊的具体诊断内容
-            3. 相关的用药建议
-            并结合治疗指南提供用药参考。
+            1.查询购买金额最高的前5名客户的姓名、联系方式和总消费金额
+            2.显示每种产品的平均售价和销售总量
+            3.找出评分最高和最低的商品的详细信息，包括名称、类型和价格
+            4.生成一份报告, 列出消费金额超过2000元的高价值客户及其购买的所有商品
+            5.分析哪些商品被金卡会员购买次数最多，并按受欢迎程度排序
             """
             
             # 保存初始查询
