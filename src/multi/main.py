@@ -5,7 +5,7 @@ import json
 import logging
 import time
 import traceback
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from crewai.flow.flow import Flow, listen, start
 
@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class QueryState(BaseModel):
-    """查询状态模型"""
+    """查询状态模型，增强版"""
     query: str = ""
     plan: str = ""
     db_data: str = ""
@@ -30,6 +30,11 @@ class QueryState(BaseModel):
     doc_data: str = ""
     schema_matches: str = ""
     sql_query: str = ""
+    error: Optional[str] = None
+    status: str = "initialized"  # 添加状态跟踪
+    execution_start: Optional[datetime] = None
+    execution_end: Optional[datetime] = None
+    step_metrics: Dict[str, Any] = Field(default_factory=dict)  # 记录各步骤指标
 
 class QueryFlow(Flow[QueryState]):
     """查询处理流程"""

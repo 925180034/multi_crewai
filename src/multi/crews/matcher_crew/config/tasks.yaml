@@ -1,10 +1,24 @@
 match_schemas:
   description: >
-    Analyze the retrieved data and match schemas.
+    Analyze data structures from multiple sources and identify meaningful relationships and mappings.
+    Develop a comprehensive understanding of how different data elements relate across sources.
+    Consider the following aspects:
+    1. Entity identification and resolution
+    2. Property mapping and transformation rules
+    3. Relationship cardinality and constraints
+    4. Semantic equivalence despite syntactic differences
+    5. Integration patterns and best practices
+    
     Query: {query}
     Database Data: {db_data}
     Web Data: {web_data}  
     Document Data: {doc_data}
   expected_output: >
-    Matched schemas and relationships between different data sources.
-  agent: schema_matcher  
+    A comprehensive schema matching analysis including:
+    1. Identified entities across all data sources
+    2. Property mapping tables showing equivalence
+    3. Relationship diagrams illustrating connections
+    4. Integration challenges and recommended approaches
+    5. Data transformation requirements
+    6. Consistency validation rules
+  agent: schema_matcher

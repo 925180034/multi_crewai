@@ -1,28 +1,65 @@
 search_database:
   description: >
-    Search the database for relevant information based on the query.
-    Consider the data structure and relationships when searching.
+    Conduct a thorough search of database resources to extract all relevant information for the query.
+    Analyze the database structure, relationships, and constraints to formulate optimal search strategies.
+    Consider the following aspects:
+    1. Key tables and their relationships
+    2. Critical filters and conditions
+    3. Required aggregations and calculations
+    4. Data quality considerations
+    5. Performance optimization for large datasets
+    
     Query: {query}
     Plan: {plan}
   expected_output: >
-    Retrieved database information formatted in a clear and structured way,
-    including context and relationships.
+    Comprehensive database information including:
+    1. Relevant table structures and relationships
+    2. Sample SQL queries addressing each part of the request
+    3. Expected data shape and volume
+    4. Potential performance considerations
+    5. Data quality notes and caveats
   agent: database_agent
 
 search_web:
   description: >
-    Search the web for relevant information related to the query.
+    Conduct an extensive web search to gather relevant, accurate, and up-to-date information related to the query.
+    Use multiple search strategies to ensure comprehensive coverage while maintaining focus on the specific requirements.
+    Consider the following aspects:
+    1. Authoritative sources for the domain
+    2. Recent updates or changes in relevant information
+    3. Best practices and standards
+    4. Common challenges and solutions
+    5. Comparative analysis where applicable
+    
     Query: {query}
     Plan: {plan}
   expected_output: >
-    Relevant web search results organized in a clear format.
+    A well-organized compilation of web-sourced information including:
+    1. Key insights relevant to each part of the query
+    2. Source credibility assessment
+    3. Comparative analysis of different approaches
+    4. Implementation considerations
+    5. Relevant examples and case studies
   agent: web_agent
 
 search_documents:
   description: >
-    Search through available documents for relevant information.
+    Perform detailed analysis of available documents to extract relevant information and insights.
+    Apply advanced document understanding techniques to identify key information regardless of structure.
+    Consider the following aspects:
+    1. Key concepts and terminology
+    2. Structural patterns across documents
+    3. Relevant examples and templates
+    4. Historical context and evolution
+    5. Implicit relationships and dependencies
+    
     Query: {query}
     Plan: {plan}
   expected_output: >
-    Extracted document information with source references.
+    Comprehensive document analysis including:
+    1. Key extracted information relevant to each query component
+    2. Source document references
+    3. Information confidence assessment
+    4. Contextual notes and interpretations
+    5. Identified patterns and templates
   agent: document_agent

@@ -1,8 +1,24 @@
 generate_sql:
   description: >
-    Generate SQL query based on the analyzed requirements and schema matches.
+    Create precise, efficient SQL queries that fulfill the requirements based on the provided
+    schema information and analysis. Your queries should be optimized for both readability
+    and performance while adhering to best practices.
+    
+    Consider the following aspects:
+    1. Query optimization for performance
+    2. Appropriate use of joins, aggregations, and window functions
+    3. Handling of edge cases and potential null values
+    4. Clear formatting and documentation
+    5. Consistency across multiple queries
+    
     Query: {query}
     Schema matches: {schema_matches}
   expected_output: >
-    A valid SQL query that retrieves the requested information.
-  agent: sql_generator_agent  
+    A set of well-documented SQL queries that:
+    1. Directly address each component of the original query
+    2. Follow consistent naming and formatting conventions
+    3. Include comments explaining complex logic
+    4. Incorporate performance optimization techniques
+    5. Handle potential edge cases gracefully
+    6. Can be executed independently or as a batch
+  agent: sql_generator_agent
