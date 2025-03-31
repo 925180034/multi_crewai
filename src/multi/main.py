@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 import json
 import logging
+import time
+import traceback
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from crewai.flow.flow import Flow, listen, start
@@ -182,27 +184,60 @@ class QueryFlow(Flow[QueryState]):
 
     @listen(create_plan)
     def retrieve_data(self):
-        """检索数据"""
+        """检索数据，增强错误处理和状态验证"""
         try:
-            result = self.retrieval_crew.crew().kickoff(
-                inputs={
-                    "query": self.state.query,
-                    "plan": self.state.plan
-                }
-            )
+            # 验证必要的前置条件
+            if not self.state.query or not self.state.plan:
+                logger.error("Missing required state for data retrieval")
+                self.state.error = "Missing query or plan for data retrieval"
+                return
+                
+            logger.info(f"Starting data retrieval with query length: {len(self.state.query)}")
             
-            if hasattr(result, 'tasks_output'):
-                self.state.db_data = result.tasks_output[0].raw if len(result.tasks_output) > 0 else ""
-                self.state.web_data = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
-                self.state.doc_data = result.tasks_output[2].raw if len(result.tasks_output) > 2 else ""
+            # 尝试初始化检索小组
+            retry_count = 0
+            max_retries = 3
             
-            self.save_crew_output("retrieve_data", result)
-            logger.info("Data retrieved successfully")
+            while retry_count < max_retries:
+                try:
+                    result = self.retrieval_crew.crew().kickoff(
+                        inputs={
+                            "query": self.state.query,
+                            "plan": self.state.plan
+                        }
+                    )
+                    
+                    # 处理结果并验证数据完整性
+                    if hasattr(result, 'tasks_output'):
+                        self.state.db_data = result.tasks_output[0].raw if len(result.tasks_output) > 0 else ""
+                        self.state.web_data = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
+                        self.state.doc_data = result.tasks_output[2].raw if len(result.tasks_output) > 2 else ""
+                        
+                        # 验证数据完整性
+                        if not self.state.db_data and not self.state.web_data and not self.state.doc_data:
+                            logger.warning("No data retrieved from any source")
+                            # 继续执行，但记录警告
+                    
+                    self.save_crew_output("retrieve_data", result)
+                    logger.info("Data retrieved successfully")
+                    break
+                    
+                except Exception as e:
+                    retry_count += 1
+                    logger.warning(f"Retrieval attempt {retry_count} failed: {str(e)}")
+                    if retry_count >= max_retries:
+                        raise
+                    time.sleep(2 ** retry_count)  # 指数退避
             
         except Exception as e:
-            logger.error(f"Error in retrieve_data: {str(e)}")
-            self.save_crew_output("retrieve_data_error", {"error": str(e)})
-            raise
+            error_details = {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            }
+            logger.error(f"Error in retrieve_data: {str(e)}", exc_info=True)
+            self.save_crew_output("retrieve_data_error", error_details)
+            self.state.error = f"Data retrieval failed: {str(e)}"
 
     @listen(retrieve_data)
     def match_schemas(self):
