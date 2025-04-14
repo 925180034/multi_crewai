@@ -136,7 +136,10 @@ class RetrievalCrew:
             return RetrievalTools(
                 db_url=os.getenv('MYSQL_DATABASE_URL'),
                 docs_dir=os.getenv('DOCS_DIR', './documents'),
-                index_dir=os.getenv('INDEX_PERSIST_DIR', './index_storage')
+                index_dir=os.getenv('INDEX_PERSIST_DIR', './index_storage'),
+                embedding_model="text-embedding-3-small",  # 更新为新版嵌入模型
+                chunk_size=512,  # 调整块大小
+                chunk_overlap=50
             )
         except Exception as e:
             logger.error(f"Failed to initialize tools: {str(e)}")
@@ -269,4 +272,5 @@ class RetrievalCrew:
     def __del__(self):
         """析构函数，确保资源被清理"""
         self.cleanup()
+
 

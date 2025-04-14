@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from tenacity import retry, wait_exponential, stop_after_attempt
 from pymysql.cursors import DictCursor
 import pymysql
+from llama_index.core.storage import StorageContext
 
 from crewai_tools import MySQLSearchTool, SerperDevTool, LlamaIndexTool
 from llama_index.core import (
@@ -105,8 +106,17 @@ class RetrievalTools:
         Returns:
             StorageContext: LlamaIndex存储上下文
         """
-        from llama_index.core.storage import StorageContext
         
+        # 设置 LlamaIndex 全局配置
+        Settings.embed_model = OpenAIEmbedding(
+            api_key=self.openai_api_key,
+            model="text-embedding-3-small",
+            dimensions=1536,
+            timeout=60  # 增加超时时间
+        )
+        Settings.chunk_size = self.chunk_size
+        Settings.chunk_overlap = self.chunk_overlap
+
         # 创建必要的目录
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
@@ -313,21 +323,22 @@ class RetrievalTools:
                     embedder=dict(
                         provider="openai",
                         config=dict(
-                            model="text-embedding-ada-002",
+                            model="text-embedding-3-small",  
+                            dimensions=1536,
                         ),
                     ),
                 ),
                 chunk_size=5,
                 similarity_threshold=0.7,
                 max_results=10,
-                connection_timeout=10,
-                query_timeout=30,
+                connection_timeout=15,  
+                query_timeout=45,
                 retry_strategy={
                     "max_attempts": 3,
                     "backoff_factor": 2
                 }
             )
-
+        
         except Exception as e:
             logger.error(f"Failed to create database search tool: {str(e)}")
             return None
