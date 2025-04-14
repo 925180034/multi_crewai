@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 import logging
+import os
 import time
 import traceback
 from pydantic import BaseModel, Field
@@ -31,19 +32,27 @@ class QueryState(BaseModel):
     schema_matches: str = ""
     sql_query: str = ""
     error: Optional[str] = None
-    status: str = "initialized"  # 添加状态跟踪
+    status: str = "initialized"
     execution_start: Optional[datetime] = None
     execution_end: Optional[datetime] = None
-    step_metrics: Dict[str, Any] = Field(default_factory=dict)  # 记录各步骤指标
+    step_metrics: Dict[str, Any] = Field(default_factory=dict)
+    # Spider-specific fields
+    db_schema: Optional[Dict[str, Any]] = None
+    db_id: str = ""
+    gold_sql: str = ""  # 参考SQL（从Spider获取）
 
 class QueryFlow(Flow[QueryState]):
     """查询处理流程"""
     
-    def __init__(self):
+    def __init__(self, spider_dataset_path=None):
         """初始化查询流程"""
         super().__init__()
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
+        
+        # 存储Spider数据集路径
+        self.spider_dataset_path = spider_dataset_path
+        logger.info(f'QueryFlow初始化，Spider数据集路径: {self.spider_dataset_path}')
         
         # 初始化crews
         self.planner_crew = None
@@ -56,12 +65,27 @@ class QueryFlow(Flow[QueryState]):
         try:
             if not self.planner_crew:
                 self.planner_crew = PlannerCrew()
+            
             if not self.retrieval_crew:
-                self.retrieval_crew = RetrievalCrew()
+                # 检查路径是否可用
+                if self.spider_dataset_path and os.path.exists(self.spider_dataset_path):
+                    logger.info(f'正在使用Spider数据集初始化检索小组: {self.spider_dataset_path}')
+                    self.retrieval_crew = RetrievalCrew(dataset_path=self.spider_dataset_path)
+                else:
+                    logger.info('初始化检索小组，无Spider数据集')
+                    self.retrieval_crew = RetrievalCrew()
+            
             if not self.matcher_crew:
                 self.matcher_crew = MatcherCrew()
+            
             if not self.sql_crew:
-                self.sql_crew = SQLCrew()
+                # 检查路径是否可用
+                if self.spider_dataset_path and os.path.exists(self.spider_dataset_path):
+                    logger.info(f'正在使用Spider数据集初始化SQL小组: {self.spider_dataset_path}')
+                    self.sql_crew = SQLCrew(spider_dataset_path=self.spider_dataset_path)
+                else:
+                    logger.info('初始化SQL小组，无Spider数据集')
+                    self.sql_crew = SQLCrew()
         except Exception as e:
             logger.error(f"Error initializing crews: {str(e)}")
             raise
@@ -155,17 +179,56 @@ class QueryFlow(Flow[QueryState]):
         try:
             self._initialize_crews()
             
-            self.state.query = """
-            1.查询购买金额最高的前5名客户的姓名、联系方式和总消费金额
-            2.显示每种产品的平均售价和销售总量
-            3.找出评分最高和最低的商品的详细信息，包括名称、类型和价格
-            4.生成一份报告, 列出消费金额超过2000元的高价值客户及其购买的所有商品
-            5.分析哪些商品被金卡会员购买次数最多，并按受欢迎程度排序
-            """
-            
+            # 如果已提供Spider数据集路径
+            if self.spider_dataset_path:
+                # 尝试使用第一个Spider查询作为示例
+                try:
+                    import json
+                    import os
+                    
+                    # 从Spider dev集加载查询
+                    dev_file = os.path.join(self.spider_dataset_path, 'dev.json')
+                    if os.path.exists(dev_file):
+                        with open(dev_file, 'r') as f:
+                            dev_data = json.load(f)
+                        
+                        if dev_data and len(dev_data) > 0:
+                            # 使用第一个查询作为示例
+                            self.state.query = dev_data[0]['question']
+                            self.state.db_id = dev_data[0]['db_id']
+                            logger.info(f"使用Spider示例查询: {self.state.query}")
+                            
+                            # 加载对应的数据库模式
+                            tables_file = os.path.join(self.spider_dataset_path, 'tables.json')
+                            with open(tables_file, 'r') as f:
+                                db_schemas = json.load(f)
+                            
+                            # 找到此数据库的模式
+                            for schema in db_schemas:
+                                if schema['db_id'] == self.state.db_id:
+                                    self.state.db_schema = schema
+                                    break
+                except Exception as e:
+                    logger.error(f"使用Spider示例查询时出错: {str(e)}")
+                    # 回退到默认查询
+                    self.state.query = """
+                    查找所有客户的姓名和他们的总消费金额，按金额降序排列。
+                    """
+            else:
+                # 使用默认查询
+                self.state.query = """
+                查找所有客户的姓名和他们的总消费金额，按金额降序排列。
+                """
+                
             # 保存初始查询
             with open(self.output_dir / f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f:
-                json.dump({"query": self.state.query}, f, ensure_ascii=False, indent=2)
+                query_data = {"query": self.state.query}
+                if hasattr(self.state, 'db_schema'):
+                    query_data["db_schema"] = self.state.db_schema
+                if hasattr(self.state, 'db_id'):
+                    query_data["db_id"] = self.state.db_id
+                
+                json.dump(query_data, f, ensure_ascii=False, indent=2)
                 
             logger.info("Initial query processed")
         except Exception as e:
@@ -268,13 +331,31 @@ class QueryFlow(Flow[QueryState]):
     def generate_sql(self):
         """生成SQL查询"""
         try:
+            # 准备数据库模式信息
+            db_schema_info = ""
+            db_id = ""
+            
+            # 如果状态中有db_schema（从Spider加载的），使用它
+            if hasattr(self.state, 'db_schema') and self.state.db_schema:
+                db_schema_info = json.dumps(self.state.db_schema, ensure_ascii=False, indent=2)
+                if hasattr(self.state, 'db_id'):
+                    db_id = self.state.db_id
+            
+            # 如果SQL crew加载了Spider模式但状态中没有特定模式
+            elif self.sql_crew and hasattr(self.sql_crew, 'db_schemas') and self.sql_crew.db_schemas:
+                # 使用第一个模式作为示例
+                db_schema_info = json.dumps(self.sql_crew.db_schemas[0], ensure_ascii=False, indent=2)
+                db_id = self.sql_crew.db_schemas[0].get('db_id', '')
+            
             result = self.sql_crew.crew().kickoff(
                 inputs={
                     "query": self.state.query,
                     "db_data": self.state.db_data,
                     "web_data": self.state.web_data,
                     "doc_data": self.state.doc_data,
-                    "schema_matches": self.state.schema_matches
+                    "schema_matches": self.state.schema_matches,
+                    "db_schema": db_schema_info,
+                    "db_id": db_id
                 }
             )
             self.state.sql_query = result.raw if hasattr(result, 'raw') else str(result)
@@ -285,9 +366,16 @@ class QueryFlow(Flow[QueryState]):
             self.save_crew_output("sql_query_error", {"error": str(e)})
             raise
 
-def kickoff():
+def kickoff(spider_dataset_path=None):
     """启动查询流程"""
-    query_flow = QueryFlow()
+
+    # 获取Spider数据集路径
+    spider_dir = os.getenv('SPIDER_DATASET_PATH')
+    if not spider_dir or not os.path.exists(spider_dir):
+        logger.error(f'Spider数据集未在{spider_dir}找到')
+        raise ValueError('SPIDER_DATASET_PATH未在.env文件中正确设置')
+    
+    query_flow = QueryFlow(spider_dataset_path=spider_dataset_path)
     try:
         result = query_flow.kickoff()
         
@@ -327,6 +415,63 @@ def plot():
     except Exception as e:
         logger.error(f"Error generating flow plot: {str(e)}")
         raise
+
+def test_with_spider(spider_dataset_path, query_index=0):
+    """使用Spider数据集中的查询测试框架"""
+    import json
+    import os
+    
+    # 从Spider开发集加载查询
+    dev_file = os.path.join(spider_dataset_path, 'dev.json')
+    if not os.path.exists(dev_file):
+        raise FileNotFoundError(f'Spider dev文件未在 {dev_file} 找到')
+    
+    with open(dev_file, 'r') as f:
+        dev_data = json.load(f)
+    
+    if not dev_data or query_index >= len(dev_data):
+        raise ValueError(f'无效的查询索引 {query_index}。数据集有 {len(dev_data)} 个查询')
+    
+    # 获取选定的查询
+    query_item = dev_data[query_index]
+    nl_query = query_item['question']
+    db_id = query_item['db_id']
+    gold_sql = query_item['query']
+    
+    # 加载相应的数据库模式
+    tables_file = os.path.join(spider_dataset_path, 'tables.json')
+    with open(tables_file, 'r') as f:
+        db_schemas = json.load(f)
+    
+    # 找到此数据库的模式
+    db_schema = None
+    for schema in db_schemas:
+        if schema['db_id'] == db_id:
+            db_schema = schema
+            break
+    
+    if not db_schema:
+        raise ValueError(f'未找到数据库 {db_id} 的模式')
+    
+    # 使用Spider数据集初始化查询流程
+    query_flow = QueryFlow(spider_dataset_path=spider_dataset_path)
+    
+    # 覆盖查询
+    query_flow.state.query = nl_query
+    query_flow.state.db_schema = db_schema
+    
+    # 设置数据库ID到状态以便SQLCrew可以访问
+    query_flow.state.db_id = db_id
+    
+    # 运行流程
+    result = query_flow.kickoff()
+    
+    # 比较结果
+    print(f'自然语言查询: {nl_query}')
+    print(f'标准SQL: {gold_sql}')
+    print(f'生成的SQL: {query_flow.state.sql_query}')
+    
+    return result
 
 if __name__ == "__main__":
     kickoff()

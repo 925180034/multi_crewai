@@ -4,6 +4,11 @@ generate_sql:
     schema information and analysis. Your queries should be optimized for both readability
     and performance while adhering to best practices.
     
+    Database Schema Information:
+    {db_schema}
+    
+    Database ID: {db_id}
+    
     Consider the following aspects:
     1. Query optimization for performance
     2. Appropriate use of joins, aggregations, and window functions
@@ -20,5 +25,5 @@ generate_sql:
     3. Include comments explaining complex logic
     4. Incorporate performance optimization techniques
     5. Handle potential edge cases gracefully
-    6. Can be executed independently or as a batch
+    6. Can be executed against the specified database schema
   agent: sql_generator_agent

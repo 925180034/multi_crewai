@@ -3,7 +3,7 @@ from crewai.project import CrewBase, agent, crew, task
 import os
 import logging
 from typing import Optional, List
-from multi.tools.retrieval_tools import RetrievalTools
+from multi.tools.retrieval_tools import RetrievalTools, DocumentRetrievalTool
 from crewai.tools import BaseTool
 from typing import Type, Dict, Any
 from pydantic import BaseModel, Field
@@ -23,15 +23,19 @@ class RetrievalCrew:
     agents_config = "config/agents.yaml"
     tasks_config = "config/tasks.yaml"
 
-    def __init__(self):
+    def __init__(self, dataset_path=None):
         """初始化检索小组"""
         # 先调用父类初始化方法
         super().__init__()
         
+        # 存储Spider数据集路径
+        self.dataset_path = dataset_path
+        logger.info(f'RetrievalCrew初始化，数据集路径: {self.dataset_path}')
+        
         # 默认设置空工具
         self.doc_tool = None
         self.db_tool = None
-        self.web_tool = None
+        self.web_tool = None  # 禁用此工具以避免消耗Serper tokens
         self.tools = None
         
         try:
@@ -43,27 +47,29 @@ class RetrievalCrew:
             self.tools = self._initialize_tools()
             
             if self.tools:
-                # 分别获取每个工具，不抛出错误
+                # 只初始化文档工具和数据库工具，不初始化web工具
                 try:
-                    self.web_tool = self.tools.get_web_tool()
-                    logger.info("网络检索工具初始化成功" if self.web_tool else "网络检索工具获取失败")
-                except Exception as e:
-                    logger.error(f"网络工具初始化失败: {str(e)}")
-                    self.web_tool = None
+                    # 不初始化web_tool以避免使用Serper tokens
+                    # self.web_tool = self.tools.get_web_tool()
+                    self.web_tool = self._create_fallback_web_tool()  # 使用后备工具代替
+                    logger.info("使用后备网络检索工具以避免消耗Serper tokens")
                     
-                try:
-                    self.doc_tool = self.tools.get_document_tool()
-                    logger.info("文档检索工具初始化成功" if self.doc_tool else "文档检索工具获取失败")
-                except Exception as e:
-                    logger.error(f"文档工具初始化失败: {str(e)}")
-                    self.doc_tool = None
+                    # 文档工具初始化
+                    if self.dataset_path:
+                        # 如果提供了数据集路径，使用Spider数据集
+                        self.doc_tool = DocumentRetrievalTool(
+                            document_path=self.dataset_path
+                        )
+                        logger.info(f'使用Spider数据集初始化文档检索工具: {self.dataset_path}')
+                    else:
+                        # 否则使用默认文档工具
+                        self.doc_tool = self.tools.get_document_tool()
                     
-                try:
+                    # 数据库工具初始化
                     self.db_tool = self.tools.get_database_tool()
-                    logger.info("数据库检索工具初始化成功" if self.db_tool else "数据库检索工具获取失败")
+                    
                 except Exception as e:
-                    logger.error(f"数据库工具初始化失败: {str(e)}")
-                    self.db_tool = None
+                    logger.error(f"工具初始化失败: {str(e)}")
             else:
                 logger.warning("检索工具集初始化失败")
         except Exception as e:
@@ -87,25 +93,75 @@ class RetrievalCrew:
         return FallbackDBTool()
 
     def _create_fallback_web_tool(self):
-        """创建一个后备网络搜索工具，在主要工具失败时使用"""
-        from crewai.tools import BaseTool
-        from typing import Type, Dict, Any
-        from pydantic import BaseModel, Field
+        """创建一个功能性的后备网络工具，可以返回Spider相关信息而不是使用Serper"""
         
+        from crewai.tools import BaseTool
+        from typing import Type
+        from pydantic import BaseModel, Field
+        import json
+        import os
         # 创建输入模型
-        class FallbackWebInput(BaseModel):
+        class SpiderWebInput(BaseModel):
             query: str = Field(..., description="The search query")
         
-        # 定义后备工具
-        class FallbackWebTool(BaseTool):
-            name: str = "Fallback Web Search"
-            description: str = "A fallback tool for web searches when the primary tool is unavailable"
-            args_schema: Type[BaseModel] = FallbackWebInput
+        # 定义包含Spider信息的后备工具
+        class SpiderInfoTool(BaseTool):
+            name: str = "Spider Database Info Tool"
+            description: str = "Provides information about database schemas and SQL queries from the Spider dataset instead of searching the web"
+            args_schema: Type[BaseModel] = SpiderWebInput
+            dataset_path: str = self.dataset_path if hasattr(self, 'dataset_path') else None
             
             def _run(self, query: str) -> str:
-                return f"Web search tool is currently unavailable. Your query was: {query}"
+                """从Spider数据集返回相关信息，而不是搜索网络"""
+                if not self.dataset_path or not os.path.exists(self.dataset_path):
+                    return f"[后备工具] 无法提供Spider信息因为数据集路径不可用。您的查询是: {query}"
+                
+                try:
+                    # 尝试从数据集加载一些相关信息
+                    response_parts = []
+                    
+                    # 检查tables.json
+                    tables_path = os.path.join(self.dataset_path, 'tables.json')
+                    if os.path.exists(tables_path):
+                        with open(tables_path, 'r') as f:
+                            tables_data = json.load(f)
+                        response_parts.append(f"Spider数据集包含{len(tables_data)}个数据库模式。")
+                        
+                        # 找到与查询相关的数据库（简单匹配）
+                        relevant_dbs = []
+                        for db_schema in tables_data:
+                            if any(keyword in db_schema.get('db_id', '').lower() for keyword in query.lower().split()):
+                                relevant_dbs.append(db_schema.get('db_id', ''))
+                        
+                        if relevant_dbs:
+                            response_parts.append(f"与您的查询相关的数据库可能包括: {', '.join(relevant_dbs)}")
+                    
+                    # 检查dev.json中的示例
+                    dev_path = os.path.join(self.dataset_path, 'dev.json')
+                    if os.path.exists(dev_path):
+                        with open(dev_path, 'r') as f:
+                            dev_data = json.load(f)
+                        response_parts.append(f"开发集包含{len(dev_data)}个查询示例。")
+                        
+                        # 找到与查询相关的示例（简单匹配）
+                        query_keywords = query.lower().split()
+                        for i, item in enumerate(dev_data[:5]):  # 只检查前5个以保持响应简短
+                            example_query = item.get('question', '').lower()
+                            if any(keyword in example_query for keyword in query_keywords):
+                                response_parts.append(f"相关示例 #{i+1}:")
+                                response_parts.append(f"问题: {item.get('question', '')}")
+                                response_parts.append(f"SQL: {item.get('query', '')}")
+                                response_parts.append(f"数据库: {item.get('db_id', '')}")
+                                break
+                    
+                    if not response_parts:
+                        return f"[后备工具] 无法在Spider数据集中找到与'{query}'相关的信息。"
+                    
+                    return "\n".join(response_parts)
+                except Exception as e:
+                    return f"[后备工具] 处理Spider数据集时出错: {str(e)}"
         
-        return FallbackWebTool()
+        return SpiderInfoTool()
 
     def _validate_environment(self) -> None:
         """验证必要的环境变量，包括默认值处理"""
