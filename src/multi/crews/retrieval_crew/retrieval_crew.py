@@ -3,7 +3,8 @@ from crewai.project import CrewBase, agent, crew, task
 import os
 import logging
 from typing import Optional, List
-from multi.tools.retrieval_tools import RetrievalTools, DocumentRetrievalTool
+from multi.tools.retrieval_tools import RetrievalTools
+from multi.tools.document_retrieval_tool import DocumentRetrievalTool
 from crewai.tools import BaseTool
 from typing import Type, Dict, Any
 from pydantic import BaseModel, Field

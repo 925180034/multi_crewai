@@ -44,21 +44,112 @@ class QueryState(BaseModel):
 class QueryFlow(Flow[QueryState]):
     """查询处理流程"""
     
-    def __init__(self, spider_dataset_path=None):
-        """初始化查询流程"""
+    def __init__(self, dataset_path=None, dataset_type="default"):
+        """
+        初始化查询流程
+        
+        Args:
+            dataset_path (str, optional): 数据集路径. Defaults to None.
+            dataset_type (str, optional): 数据集类型 ("spider", "custom", "default"). Defaults to "default".
+        """
         super().__init__()
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
         
-        # 存储Spider数据集路径
-        self.spider_dataset_path = spider_dataset_path
-        logger.info(f'QueryFlow初始化，Spider数据集路径: {self.spider_dataset_path}')
+        # 存储数据集信息
+        self.dataset_path = dataset_path
+        self.dataset_type = dataset_type
+        logger.info(f'QueryFlow初始化，{dataset_type}数据集路径: {dataset_path}')
+        
+        # 为兼容性保留spider_dataset_path
+        self.spider_dataset_path = dataset_path if dataset_type == "spider" else None
         
         # 初始化crews
         self.planner_crew = None
         self.retrieval_crew = None
         self.matcher_crew = None
         self.sql_crew = None
+
+    def _load_dataset(self):
+        """
+        根据数据集类型加载数据
+        
+        Returns:
+            dict: 加载的数据
+        """
+        try:
+            if not self.dataset_path or not os.path.exists(self.dataset_path):
+                logger.warning(f'数据集路径无效: {self.dataset_path}')
+                return None
+            
+            if self.dataset_type == "spider":
+                return self._load_spider_dataset()
+            elif self.dataset_type == "custom":
+                return self._load_custom_dataset()
+            else:
+                logger.warning(f'未知的数据集类型: {self.dataset_type}')
+                return None
+        except Exception as e:
+            logger.error(f'加载数据集时出错: {str(e)}')
+            return None
+
+    def _load_spider_dataset(self):
+        """
+        加载Spider数据集
+        
+        Returns:
+            dict: Spider数据集数据
+        """
+        try:
+            import json
+            
+            # 从Spider dev集加载查询
+            dev_file = os.path.join(self.dataset_path, 'dev.json')
+            if os.path.exists(dev_file):
+                with open(dev_file, 'r') as f:
+                    dev_data = json.load(f)
+                
+                if dev_data and len(dev_data) > 0:
+                    # 加载对应的数据库模式
+                    tables_file = os.path.join(self.dataset_path, 'tables.json')
+                    if os.path.exists(tables_file):
+                        with open(tables_file, 'r') as f:
+                            db_schemas = json.load(f)
+                        
+                        return {
+                            "queries": dev_data,
+                            "schemas": db_schemas
+                        }
+            
+            logger.warning(f'无法加载Spider数据集: {self.dataset_path}')
+            return None
+        except Exception as e:
+            logger.error(f'加载Spider数据集时出错: {str(e)}')
+            return None
+
+    def _load_custom_dataset(self):
+        """
+        加载自定义数据集
+        
+        Returns:
+            dict: 自定义数据集数据
+        """
+        try:
+            import json
+            
+            # 加载自定义数据集
+            data_file = os.path.join(self.dataset_path, 'data.json')
+            if os.path.exists(data_file):
+                with open(data_file, 'r') as f:
+                    data = json.load(f)
+                
+                return data
+            
+            logger.warning(f'无法加载自定义数据集: {self.dataset_path}')
+            return None
+        except Exception as e:
+            logger.error(f'加载自定义数据集时出错: {str(e)}')
+            return None
 
     def _initialize_crews(self):
         """初始化所有crews"""
@@ -150,28 +241,6 @@ class QueryFlow(Flow[QueryState]):
         except Exception as e:
             logger.error(f"Error saving crew output: {str(e)}")
 
-    # @start()
-    # def process_query(self):
-    #     """处理初始查询"""
-    #     try:
-    #         self._initialize_crews()
-            
-    #         self.state.query = """
-    #         查找所有患者中最近一次就诊诊断为糖尿病的记录，包括：
-    #         1. 患者的基本信息
-    #         2. 就诊的具体诊断内容
-    #         3. 相关的用药建议
-    #         并结合治疗指南提供用药参考。
-    #         """
-            
-    #         # 保存初始查询
-    #         with open(self.output_dir / f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f:
-    #             json.dump({"query": self.state.query}, f, ensure_ascii=False, indent=2)
-                
-    #         logger.info("Initial query processed")
-    #     except Exception as e:
-    #         logger.error(f"Error processing query: {str(e)}")
-    #         raise
 
     @start()
     def process_query(self):
@@ -179,53 +248,49 @@ class QueryFlow(Flow[QueryState]):
         try:
             self._initialize_crews()
             
-            # 如果已提供Spider数据集路径
-            if self.spider_dataset_path:
-                # 尝试使用第一个Spider查询作为示例
-                try:
-                    import json
-                    import os
+            # 加载数据集
+            dataset = None
+            if self.dataset_path:
+                dataset = self._load_dataset()
+            
+            if dataset and self.dataset_type == "spider":
+                # 使用Spider数据集
+                queries = dataset.get("queries", [])
+                schemas = dataset.get("schemas", [])
+                
+                if queries and len(queries) > 0:
+                    # 使用第一个查询作为示例
+                    self.state.query = queries[0]['question']
+                    self.state.db_id = queries[0]['db_id']
+                    logger.info(f"使用{self.dataset_type}示例查询: {self.state.query}")
                     
-                    # 从Spider dev集加载查询
-                    dev_file = os.path.join(self.spider_dataset_path, 'dev.json')
-                    if os.path.exists(dev_file):
-                        with open(dev_file, 'r') as f:
-                            dev_data = json.load(f)
-                        
-                        if dev_data and len(dev_data) > 0:
-                            # 使用第一个查询作为示例
-                            self.state.query = dev_data[0]['question']
-                            self.state.db_id = dev_data[0]['db_id']
-                            logger.info(f"使用Spider示例查询: {self.state.query}")
-                            
-                            # 加载对应的数据库模式
-                            tables_file = os.path.join(self.spider_dataset_path, 'tables.json')
-                            with open(tables_file, 'r') as f:
-                                db_schemas = json.load(f)
-                            
-                            # 找到此数据库的模式
-                            for schema in db_schemas:
-                                if schema['db_id'] == self.state.db_id:
-                                    self.state.db_schema = schema
-                                    break
-                except Exception as e:
-                    logger.error(f"使用Spider示例查询时出错: {str(e)}")
-                    # 回退到默认查询
-                    self.state.query = """
-                    查找所有客户的姓名和他们的总消费金额，按金额降序排列。
-                    """
+                    # 找到此数据库的模式
+                    for schema in schemas:
+                        if schema['db_id'] == self.state.db_id:
+                            self.state.db_schema = schema
+                            break
+            elif dataset and self.dataset_type == "custom":
+                # 使用自定义数据集
+                query = dataset.get("query", "")
+                schema = dataset.get("schema", {})
+                
+                if query:
+                    self.state.query = query
+                    self.state.db_schema = schema
+                    logger.info(f"使用{self.dataset_type}查询: {self.state.query}")
             else:
                 # 使用默认查询
                 self.state.query = """
                 查找所有客户的姓名和他们的总消费金额，按金额降序排列。
                 """
-                
+                logger.info(f"使用默认查询: {self.state.query}")
+            
             # 保存初始查询
             with open(self.output_dir / f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f:
                 query_data = {"query": self.state.query}
-                if hasattr(self.state, 'db_schema'):
+                if hasattr(self.state, 'db_schema') and self.state.db_schema:
                     query_data["db_schema"] = self.state.db_schema
-                if hasattr(self.state, 'db_id'):
+                if hasattr(self.state, 'db_id') and self.state.db_id:
                     query_data["db_id"] = self.state.db_id
                 
                 json.dump(query_data, f, ensure_ascii=False, indent=2)
@@ -366,17 +431,24 @@ class QueryFlow(Flow[QueryState]):
             self.save_crew_output("sql_query_error", {"error": str(e)})
             raise
 
-def kickoff(spider_dataset_path=None):
-    """启动查询流程"""
-
-    # 获取Spider数据集路径
-    spider_dir = os.getenv('SPIDER_DATASET_PATH')
-    if not spider_dir or not os.path.exists(spider_dir):
-        logger.error(f'Spider数据集未在{spider_dir}找到')
-        raise ValueError('SPIDER_DATASET_PATH未在.env文件中正确设置')
+def kickoff(dataset_path=None, dataset_type="default"):
+    """
+    启动查询流程
     
-    query_flow = QueryFlow(spider_dataset_path=spider_dataset_path)
+    Args:
+        dataset_path (str, optional): 数据集路径. Defaults to None.
+        dataset_type (str, optional): 数据集类型 ("spider", "custom", "default"). Defaults to "default".
+    """
+
     try:
+        # 检查数据集路径
+        if dataset_path and os.path.exists(dataset_path):
+            logger.info(f'使用{dataset_type}数据集路径: {dataset_path}')
+        else:
+            logger.warning(f'{dataset_type}数据集路径无效或未提供，将使用默认查询')
+            dataset_path = None
+        
+        query_flow = QueryFlow(dataset_path=dataset_path, dataset_type=dataset_type)
         result = query_flow.kickoff()
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -396,15 +468,120 @@ def kickoff(spider_dataset_path=None):
     except Exception as e:
         logger.error(f"Error in query flow: {str(e)}")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(f"outputs/error_{timestamp}.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "timestamp": timestamp,
-                "error": str(e),
-                "state": query_flow.state.model_dump() if hasattr(query_flow, 'state') else {}
-            }, f, ensure_ascii=False, indent=2)
+        try:
+            with open(f"outputs/error_{timestamp}.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "timestamp": timestamp,
+                    "error": str(e),
+                    "state": query_flow.state.model_dump() if hasattr(query_flow, 'state') else {}
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e2:
+            logger.error(f"Error saving error output: {str(e2)}")
         raise
     finally:
-        query_flow.cleanup_crews()
+        if 'query_flow' in locals() and hasattr(query_flow, 'cleanup_crews'):
+            query_flow.cleanup_crews()
+            
+def create_mock_dataset(output_path, dataset_type="spider"):
+    """
+    创建一个简单的测试数据集
+    
+    Args:
+        output_path (str): 输出路径
+        dataset_type (str): 数据集类型 ("spider", "custom")
+    """
+    import json
+    import os
+    from pathlib import Path
+    
+    # 创建输出目录
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    
+    if dataset_type == "spider":
+        # 创建dev.json
+        dev_data = [
+            {
+                "db_id": "customers_db",
+                "question": "查找所有客户的姓名和他们的总消费金额，按金额降序排列。",
+                "query": "SELECT c.name, SUM(o.amount) as total_amount FROM customers c JOIN orders o ON c.id = o.customer_id GROUP BY c.name ORDER BY total_amount DESC"
+            }
+        ]
+        
+        with open(os.path.join(output_path, 'dev.json'), 'w', encoding='utf-8') as f:
+            json.dump(dev_data, f, ensure_ascii=False, indent=2)
+        
+        # 创建tables.json
+        tables_data = [
+            {
+                "db_id": "customers_db",
+                "tables": [
+                    {
+                        "name": "customers",
+                        "columns": [
+                            {"name": "id", "type": "int"},
+                            {"name": "name", "type": "text"},
+                            {"name": "email", "type": "text"}
+                        ]
+                    },
+                    {
+                        "name": "orders",
+                        "columns": [
+                            {"name": "id", "type": "int"},
+                            {"name": "customer_id", "type": "int"},
+                            {"name": "amount", "type": "decimal"},
+                            {"name": "date", "type": "date"}
+                        ]
+                    }
+                ],
+                "foreign_keys": [
+                    {
+                        "from": ["orders", "customer_id"],
+                        "to": ["customers", "id"]
+                    }
+                ]
+            }
+        ]
+        
+        with open(os.path.join(output_path, 'tables.json'), 'w', encoding='utf-8') as f:
+            json.dump(tables_data, f, ensure_ascii=False, indent=2)
+        
+    elif dataset_type == "custom":
+        # 创建data.json
+        data = {
+            "query": "查找所有客户的姓名和他们的总消费金额，按金额降序排列。",
+            "schema": {
+                "tables": [
+                    {
+                        "name": "customers",
+                        "columns": [
+                            {"name": "id", "type": "int"},
+                            {"name": "name", "type": "text"},
+                            {"name": "email", "type": "text"}
+                        ]
+                    },
+                    {
+                        "name": "orders",
+                        "columns": [
+                            {"name": "id", "type": "int"},
+                            {"name": "customer_id", "type": "int"},
+                            {"name": "amount", "type": "decimal"},
+                            {"name": "date", "type": "date"}
+                        ]
+                    }
+                ],
+                "foreign_keys": [
+                    {
+                        "from": ["orders", "customer_id"],
+                        "to": ["customers", "id"]
+                    }
+                ]
+            }
+        }
+        
+        with open(os.path.join(output_path, 'data.json'), 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    logger.info(f"创建模拟{dataset_type}数据集于 {output_path}")
 
 def plot():
     """绘制流程图"""
