@@ -1,29 +1,26 @@
-generate_sql:
+search_database:
   description: >
-    Create precise, efficient SQL queries that fulfill the requirements based on the provided
-    schema information and analysis. Your queries should be optimized for both readability
-    and performance while adhering to best practices.
-    
-    Database Schema Information:
-    {db_schema}
-    
-    Database ID: {db_id}
-    
-    Consider the following aspects:
-    1. Query optimization for performance
-    2. Appropriate use of joins, aggregations, and window functions
-    3. Handling of edge cases and potential null values
-    4. Clear formatting and documentation
-    5. Consistency across multiple queries
-    
+    Search for database information based on the query and plan.
     Query: {query}
-    Schema matches: {schema_matches}
+    Plan: {plan}
   expected_output: >
-    A set of well-documented SQL queries that:
-    1. Directly address each component of the original query
-    2. Follow consistent naming and formatting conventions
-    3. Include comments explaining complex logic
-    4. Incorporate performance optimization techniques
-    5. Handle potential edge cases gracefully
-    6. Can be executed against the specified database schema
-  agent: sql_generator_agent
+    Detailed information about the database structure, relationships, and data.
+  agent: database_agent  # Added this line to explicitly specify the agent used
+
+search_web:
+  description: >
+    Search the web for relevant information based on the query and plan.
+    Query: {query}
+    Plan: {plan}
+  expected_output: >
+    A summary of web information related to the query.
+  agent: web_agent  # Added this line to explicitly specify the agent used
+
+search_documents:
+  description: >
+    Search for query-related information in documents.
+    Query: {query}
+    Plan: {plan}
+  expected_output: >
+    Structured information extracted from the documents.
+  agent: document_agent  # Added this line to explicitly specify the agent used

@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-from datetime import datetime
-from pathlib import Path
+# 文件：src/multi/main.py 的优化版本
 import json
-import logging
 import os
 import time
-import traceback
+import re
+import logging
+from pathlib import Path
+from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+
 from crewai.flow.flow import Flow, listen, start
 
 from multi.crews.planner_crew.planner_crew import PlannerCrew
@@ -42,16 +44,10 @@ class QueryState(BaseModel):
     gold_sql: str = ""  # 参考SQL（从Spider获取）
 
 class QueryFlow(Flow[QueryState]):
-    """查询处理流程"""
+    """查询处理流程，简化版"""
     
     def __init__(self, dataset_path=None, dataset_type="default"):
-        """
-        初始化查询流程
-        
-        Args:
-            dataset_path (str, optional): 数据集路径. Defaults to None.
-            dataset_type (str, optional): 数据集类型 ("spider", "custom", "default"). Defaults to "default".
-        """
+        """初始化查询流程"""
         super().__init__()
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
@@ -59,322 +55,151 @@ class QueryFlow(Flow[QueryState]):
         # 存储数据集信息
         self.dataset_path = dataset_path
         self.dataset_type = dataset_type
-        logger.info(f'QueryFlow初始化，{dataset_type}数据集路径: {dataset_path}')
-        
-        # 为兼容性保留spider_dataset_path
-        self.spider_dataset_path = dataset_path if dataset_type == "spider" else None
         
         # 初始化crews
         self.planner_crew = None
         self.retrieval_crew = None
         self.matcher_crew = None
         self.sql_crew = None
-
-    def _load_dataset(self):
-        """
-        根据数据集类型加载数据
         
-        Returns:
-            dict: 加载的数据
-        """
-        try:
-            if not self.dataset_path or not os.path.exists(self.dataset_path):
-                logger.warning(f'数据集路径无效: {self.dataset_path}')
-                return None
-            
-            if self.dataset_type == "spider":
-                return self._load_spider_dataset()
-            elif self.dataset_type == "custom":
-                return self._load_custom_dataset()
-            else:
-                logger.warning(f'未知的数据集类型: {self.dataset_type}')
-                return None
-        except Exception as e:
-            logger.error(f'加载数据集时出错: {str(e)}')
-            return None
-
-    def _load_spider_dataset(self):
-        """
-        加载Spider数据集
-        
-        Returns:
-            dict: Spider数据集数据
-        """
-        try:
-            import json
-            
-            # 从Spider dev集加载查询
-            dev_file = os.path.join(self.dataset_path, 'dev.json')
-            if os.path.exists(dev_file):
-                with open(dev_file, 'r') as f:
-                    dev_data = json.load(f)
-                
-                if dev_data and len(dev_data) > 0:
-                    # 加载对应的数据库模式
-                    tables_file = os.path.join(self.dataset_path, 'tables.json')
-                    if os.path.exists(tables_file):
-                        with open(tables_file, 'r') as f:
-                            db_schemas = json.load(f)
-                        
-                        return {
-                            "queries": dev_data,
-                            "schemas": db_schemas
-                        }
-            
-            logger.warning(f'无法加载Spider数据集: {self.dataset_path}')
-            return None
-        except Exception as e:
-            logger.error(f'加载Spider数据集时出错: {str(e)}')
-            return None
-
-    def _load_custom_dataset(self):
-        """
-        加载自定义数据集
-        
-        Returns:
-            dict: 自定义数据集数据
-        """
-        try:
-            import json
-            
-            # 加载自定义数据集
-            data_file = os.path.join(self.dataset_path, 'data.json')
-            if os.path.exists(data_file):
-                with open(data_file, 'r') as f:
-                    data = json.load(f)
-                
-                return data
-            
-            logger.warning(f'无法加载自定义数据集: {self.dataset_path}')
-            return None
-        except Exception as e:
-            logger.error(f'加载自定义数据集时出错: {str(e)}')
-            return None
+        # 立即初始化所有crews
+        self._initialize_crews()
 
     def _initialize_crews(self):
-        """初始化所有crews"""
+        """初始化所有crews，简化逻辑"""
         try:
-            if not self.planner_crew:
-                self.planner_crew = PlannerCrew()
-            
-            if not self.retrieval_crew:
-                # 检查路径是否可用
-                if self.spider_dataset_path and os.path.exists(self.spider_dataset_path):
-                    logger.info(f'正在使用Spider数据集初始化检索小组: {self.spider_dataset_path}')
-                    self.retrieval_crew = RetrievalCrew(dataset_path=self.spider_dataset_path)
-                else:
-                    logger.info('初始化检索小组，无Spider数据集')
-                    self.retrieval_crew = RetrievalCrew()
-            
-            if not self.matcher_crew:
-                self.matcher_crew = MatcherCrew()
-            
-            if not self.sql_crew:
-                # 检查路径是否可用
-                if self.spider_dataset_path and os.path.exists(self.spider_dataset_path):
-                    logger.info(f'正在使用Spider数据集初始化SQL小组: {self.spider_dataset_path}')
-                    self.sql_crew = SQLCrew(spider_dataset_path=self.spider_dataset_path)
-                else:
-                    logger.info('初始化SQL小组，无Spider数据集')
-                    self.sql_crew = SQLCrew()
+            self.planner_crew = PlannerCrew()
+            self.retrieval_crew = RetrievalCrew(dataset_path=self.dataset_path)
+            self.matcher_crew = MatcherCrew()
+            self.sql_crew = SQLCrew(spider_dataset_path=self.dataset_path)
+            logger.info("所有crews初始化完成")
         except Exception as e:
-            logger.error(f"Error initializing crews: {str(e)}")
+            logger.error(f"初始化crews失败: {str(e)}")
             raise
 
     def cleanup_crews(self):
         """清理所有crews的资源"""
         try:
-            if self.retrieval_crew:
+            if hasattr(self.retrieval_crew, 'cleanup'):
                 self.retrieval_crew.cleanup()
-            # 其他crew的清理逻辑...
+            # 其他清理逻辑...
         except Exception as e:
-            logger.error(f"Error cleaning up crews: {str(e)}")
-
-    def serialize_crew_output(self, crew_output) -> Dict[str, Any]:
-        """序列化crew输出"""
-        try:
-            # 处理token使用情况
-            token_usage = {}
-            if hasattr(crew_output, 'token_usage') and crew_output.token_usage:
-                token_usage = {
-                    'total_tokens': getattr(crew_output.token_usage, 'total_tokens', 0),
-                    'prompt_tokens': getattr(crew_output.token_usage, 'prompt_tokens', 0),
-                    'completion_tokens': getattr(crew_output.token_usage, 'completion_tokens', 0)
-                }
-            
-            # 处理任务输出
-            tasks_output = []
-            if hasattr(crew_output, 'tasks_output'):
-                for task in crew_output.tasks_output:
-                    tasks_output.append({
-                        "description": task.description if hasattr(task, 'description') else None,
-                        "output": task.raw if hasattr(task, 'raw') else str(task)
-                    })
-            
-            return {
-                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-                "raw_output": crew_output.raw if hasattr(crew_output, 'raw') else str(crew_output),
-                "tasks_output": tasks_output,
-                "token_usage": token_usage
-            }
-        except Exception as e:
-            logger.error(f"Error serializing crew output: {str(e)}")
-            return {"error": str(e)}
-
-    def save_crew_output(self, name: str, crew_output):
-        """保存crew输出到文件"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = self.output_dir / f"{name}_{timestamp}.json"
-            
-            output_data = self.serialize_crew_output(crew_output)
-            
-            if hasattr(crew_output, 'model_dump'):
-                output_data['state'] = crew_output.model_dump()
-            else:
-                output_data['state'] = vars(crew_output)
-                
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, ensure_ascii=False, indent=2)
-                
-            logger.info(f"Saved crew output to {output_file}")
-        except Exception as e:
-            logger.error(f"Error saving crew output: {str(e)}")
-
+            logger.error(f"清理crews资源失败: {str(e)}")
 
     @start()
     def process_query(self):
-        """处理初始查询"""
+        """处理初始查询，简化逻辑"""
         try:
-            self._initialize_crews()
-            
-            # 加载数据集
-            dataset = None
-            if self.dataset_path:
-                dataset = self._load_dataset()
-            
-            if dataset and self.dataset_type == "spider":
-                # 使用Spider数据集
-                queries = dataset.get("queries", [])
-                schemas = dataset.get("schemas", [])
-                
-                if queries and len(queries) > 0:
-                    # 使用第一个查询作为示例
-                    self.state.query = queries[0]['question']
-                    self.state.db_id = queries[0]['db_id']
-                    logger.info(f"使用{self.dataset_type}示例查询: {self.state.query}")
-                    
-                    # 找到此数据库的模式
-                    for schema in schemas:
-                        if schema['db_id'] == self.state.db_id:
-                            self.state.db_schema = schema
-                            break
-            elif dataset and self.dataset_type == "custom":
-                # 使用自定义数据集
-                query = dataset.get("query", "")
-                schema = dataset.get("schema", {})
-                
-                if query:
-                    self.state.query = query
-                    self.state.db_schema = schema
-                    logger.info(f"使用{self.dataset_type}查询: {self.state.query}")
-            else:
-                # 使用默认查询
-                self.state.query = """
-                查找所有客户的姓名和他们的总消费金额，按金额降序排列。
-                """
-                logger.info(f"使用默认查询: {self.state.query}")
-            
-            # 保存初始查询
-            with open(self.output_dir / f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f:
-                query_data = {"query": self.state.query}
-                if hasattr(self.state, 'db_schema') and self.state.db_schema:
-                    query_data["db_schema"] = self.state.db_schema
-                if hasattr(self.state, 'db_id') and self.state.db_id:
-                    query_data["db_id"] = self.state.db_id
-                
-                json.dump(query_data, f, ensure_ascii=False, indent=2)
-                
-            logger.info("Initial query processed")
+            # 加载数据
+            self._load_query_data()
+            logger.info(f"使用查询: {self.state.query}")
         except Exception as e:
-            logger.error(f"Error processing query: {str(e)}")
+            logger.error(f"处理查询失败: {str(e)}")
+            raise
+
+    def _load_query_data(self):
+        """加载查询数据，封装逻辑"""
+        # 从Spider数据集加载
+        if self.dataset_path and self.dataset_type == "spider":
+            self._load_from_spider()
+        # 从自定义数据集加载
+        elif self.dataset_path and self.dataset_type == "custom":
+            self._load_from_custom()
+        # 使用默认查询
+        else:
+            self.state.query = "查找所有客户的姓名和他们的总消费金额，按金额降序排列。"
+
+    def _load_from_spider(self):
+        """从Spider数据集加载查询"""
+        try:
+            import json
+            
+            # 加载查询
+            dev_file = os.path.join(self.dataset_path, 'dev.json')
+            with open(dev_file, 'r') as f:
+                queries = json.load(f)
+            
+            if queries and len(queries) > 0:
+                # 使用第一个查询
+                self.state.query = queries[0]['question']
+                self.state.db_id = queries[0]['db_id']
+                
+                # 加载数据库模式
+                tables_file = os.path.join(self.dataset_path, 'tables.json')
+                with open(tables_file, 'r') as f:
+                    schemas = json.load(f)
+                
+                # 查找对应的模式
+                for schema in schemas:
+                    if schema['db_id'] == self.state.db_id:
+                        self.state.db_schema = schema
+                        break
+        except Exception as e:
+            logger.error(f"从Spider加载数据失败: {str(e)}")
+            raise
+
+    def _load_from_custom(self):
+        """从自定义数据集加载查询"""
+        try:
+            import json
+            
+            data_file = os.path.join(self.dataset_path, 'data.json')
+            with open(data_file, 'r') as f:
+                data = json.load(f)
+            
+            if 'query' in data:
+                self.state.query = data['query']
+                self.state.db_schema = data.get('schema', {})
+        except Exception as e:
+            logger.error(f"从自定义数据集加载失败: {str(e)}")
             raise
 
     @listen(process_query)
     def create_plan(self):
-        """创建执行计划"""
+        """创建执行计划，简化错误处理"""
         try:
             result = self.planner_crew.crew().kickoff(
                 inputs={"query": self.state.query}
             )
             self.state.plan = result.raw if hasattr(result, 'raw') else str(result)
-            self.save_crew_output("plan", result)
-            logger.info("Plan created successfully")
+            logger.info("计划创建成功")
         except Exception as e:
-            logger.error(f"Error in create_plan: {str(e)}")
-            self.save_crew_output("plan_error", {"error": str(e)})
-            raise
+            logger.error(f"创建计划失败: {str(e)}")
+            self.state.error = f"创建计划失败: {str(e)}"
 
     @listen(create_plan)
     def retrieve_data(self):
-        """检索数据，增强错误处理和状态验证"""
+        """检索数据，简化错误处理"""
+        if self.state.error:
+            logger.warning(f"跳过数据检索，因为存在错误: {self.state.error}")
+            return
+            
         try:
-            # 验证必要的前置条件
-            if not self.state.query or not self.state.plan:
-                logger.error("Missing required state for data retrieval")
-                self.state.error = "Missing query or plan for data retrieval"
-                return
-                
-            logger.info(f"Starting data retrieval with query length: {len(self.state.query)}")
+            result = self.retrieval_crew.crew().kickoff(
+                inputs={
+                    "query": self.state.query,
+                    "plan": self.state.plan
+                }
+            )
             
-            # 尝试初始化检索小组
-            retry_count = 0
-            max_retries = 3
+            # 处理结果
+            if hasattr(result, 'tasks_output'):
+                self.state.db_data = result.tasks_output[0].raw if len(result.tasks_output) > 0 else ""
+                self.state.web_data = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
+                self.state.doc_data = result.tasks_output[2].raw if len(result.tasks_output) > 2 else ""
             
-            while retry_count < max_retries:
-                try:
-                    result = self.retrieval_crew.crew().kickoff(
-                        inputs={
-                            "query": self.state.query,
-                            "plan": self.state.plan
-                        }
-                    )
-                    
-                    # 处理结果并验证数据完整性
-                    if hasattr(result, 'tasks_output'):
-                        self.state.db_data = result.tasks_output[0].raw if len(result.tasks_output) > 0 else ""
-                        self.state.web_data = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
-                        self.state.doc_data = result.tasks_output[2].raw if len(result.tasks_output) > 2 else ""
-                        
-                        # 验证数据完整性
-                        if not self.state.db_data and not self.state.web_data and not self.state.doc_data:
-                            logger.warning("No data retrieved from any source")
-                            # 继续执行，但记录警告
-                    
-                    self.save_crew_output("retrieve_data", result)
-                    logger.info("Data retrieved successfully")
-                    break
-                    
-                except Exception as e:
-                    retry_count += 1
-                    logger.warning(f"Retrieval attempt {retry_count} failed: {str(e)}")
-                    if retry_count >= max_retries:
-                        raise
-                    time.sleep(2 ** retry_count)  # 指数退避
-            
+            logger.info("数据检索成功")
         except Exception as e:
-            error_details = {
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc()
-            }
-            logger.error(f"Error in retrieve_data: {str(e)}", exc_info=True)
-            self.save_crew_output("retrieve_data_error", error_details)
-            self.state.error = f"Data retrieval failed: {str(e)}"
+            logger.error(f"数据检索失败: {str(e)}")
+            self.state.error = f"数据检索失败: {str(e)}"
 
     @listen(retrieve_data)
     def match_schemas(self):
-        """匹配数据模式"""
+        """匹配数据模式，简化错误处理"""
+        if self.state.error:
+            logger.warning(f"跳过模式匹配，因为存在错误: {self.state.error}")
+            return
+            
         try:
             result = self.matcher_crew.crew().kickoff(
                 inputs={
@@ -385,51 +210,219 @@ class QueryFlow(Flow[QueryState]):
                 }
             )
             self.state.schema_matches = result.raw if hasattr(result, 'raw') else str(result)
-            self.save_crew_output("schema_matches", result)
-            logger.info("Schema matching completed")
+            logger.info("模式匹配成功")
         except Exception as e:
-            logger.error(f"Error in match_schemas: {str(e)}")
-            self.save_crew_output("schema_matches_error", {"error": str(e)})
-            raise
+            logger.error(f"模式匹配失败: {str(e)}")
+            self.state.error = f"模式匹配失败: {str(e)}"
 
     @listen(match_schemas)
     def generate_sql(self):
-        """生成SQL查询"""
+        """生成SQL查询，简化错误处理"""
+        if self.state.error:
+            logger.warning(f"跳过SQL生成，因为存在错误: {self.state.error}")
+            return
+            
         try:
             # 准备数据库模式信息
             db_schema_info = ""
             db_id = ""
             
-            # 如果状态中有db_schema（从Spider加载的），使用它
+            # 使用db_schema或从SQL crew加载
             if hasattr(self.state, 'db_schema') and self.state.db_schema:
                 db_schema_info = json.dumps(self.state.db_schema, ensure_ascii=False, indent=2)
                 if hasattr(self.state, 'db_id'):
                     db_id = self.state.db_id
-            
-            # 如果SQL crew加载了Spider模式但状态中没有特定模式
             elif self.sql_crew and hasattr(self.sql_crew, 'db_schemas') and self.sql_crew.db_schemas:
-                # 使用第一个模式作为示例
                 db_schema_info = json.dumps(self.sql_crew.db_schemas[0], ensure_ascii=False, indent=2)
                 db_id = self.sql_crew.db_schemas[0].get('db_id', '')
             
             result = self.sql_crew.crew().kickoff(
                 inputs={
                     "query": self.state.query,
-                    "db_data": self.state.db_data,
-                    "web_data": self.state.web_data,
-                    "doc_data": self.state.doc_data,
-                    "schema_matches": self.state.schema_matches,
                     "db_schema": db_schema_info,
-                    "db_id": db_id
+                    "db_id": db_id,
+                    "schema_matches": self.state.schema_matches
                 }
             )
             self.state.sql_query = result.raw if hasattr(result, 'raw') else str(result)
-            self.save_crew_output("sql_query", result)
-            logger.info("SQL query generated")
+            logger.info("SQL生成成功")
         except Exception as e:
-            logger.error(f"Error in generate_sql: {str(e)}")
-            self.save_crew_output("sql_query_error", {"error": str(e)})
-            raise
+            logger.error(f"SQL生成失败: {str(e)}")
+            self.state.error = f"SQL生成失败: {str(e)}"
+
+def evaluate_sql(generated_sql, gold_sql, db_path=None):
+    """
+    评估生成的SQL与标准SQL的相似度
+    
+    Args:
+        generated_sql: 生成的SQL
+        gold_sql: 标准SQL
+        db_path: 数据库路径(可选)
+        
+    Returns:
+        float: 相似度得分(0-1)
+    """
+    # 简单的字符串比较
+    if generated_sql.strip().lower() == gold_sql.strip().lower():
+        return 1.0
+    
+    # 基本的结构化比较 (移除空格、大小写等差异)
+    def normalize_sql(sql):
+        sql = sql.lower().strip()
+        sql = re.sub(r'\s+', ' ', sql)
+        sql = re.sub(r'`', '', sql)
+        sql = re.sub(r'"', '', sql)
+        sql = re.sub(r'\'', '', sql)
+        return sql
+    
+    norm_generated = normalize_sql(generated_sql)
+    norm_gold = normalize_sql(gold_sql)
+    
+    if norm_generated == norm_gold:
+        return 0.9
+    
+    # 检查关键词和表名是否匹配
+    gold_tokens = set(re.findall(r'\b\w+\b', norm_gold))
+    generated_tokens = set(re.findall(r'\b\w+\b', norm_generated))
+    
+    # 计算tokens的重叠度
+    common_tokens = gold_tokens.intersection(generated_tokens)
+    if len(gold_tokens) > 0:
+        token_overlap = len(common_tokens) / len(gold_tokens)
+    else:
+        token_overlap = 0
+        
+    # 如果数据库路径存在，可以尝试执行SQL验证结果是否相同
+    # 注意：这是更复杂的评估，可能需要专门的工具
+    
+    return token_overlap * 0.8  # 降低权重，因为这只是基于token的简单对比
+
+def batch_test_spider(spider_dataset_path, limit=10, start_index=0):
+    """
+    批量测试Spider数据集查询
+    
+    Args:
+        spider_dataset_path: Spider数据集路径
+        limit: 测试查询数量
+        start_index: 起始索引
+        
+    Returns:
+        dict: 测试结果摘要
+    """
+    # 加载Spider数据集
+    dev_file = os.path.join(spider_dataset_path, 'dev.json')
+    if not os.path.exists(dev_file):
+        raise FileNotFoundError(f'Spider dev文件未在 {dev_file} 找到')
+    
+    with open(dev_file, 'r') as f:
+        dev_data = json.load(f)
+    
+    # 限制测试数量
+    if limit <= 0 or limit > len(dev_data):
+        limit = len(dev_data)
+    
+    test_data = dev_data[start_index:start_index + limit]
+    
+    # 创建结果目录
+    results_dir = Path("outputs/spider_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 测试单个查询
+    def test_single_query(query_item, index):
+        try:
+            start_time = time.time()
+            
+            nl_query = query_item['question']
+            db_id = query_item['db_id']
+            gold_sql = query_item['query']
+            
+            # 初始化查询流程
+            query_flow = QueryFlow(dataset_path=spider_dataset_path, dataset_type="spider")
+            
+            # 覆盖查询
+            query_flow.state.query = nl_query
+            query_flow.state.db_id = db_id
+            
+            # 运行流程
+            result = query_flow.kickoff()
+            
+            # 获取生成的SQL
+            generated_sql = query_flow.state.sql_query
+            
+            # 评估结果
+            accuracy = evaluate_sql(generated_sql, gold_sql)
+            
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            return {
+                "index": index,
+                "db_id": db_id,
+                "question": nl_query,
+                "gold_sql": gold_sql,
+                "generated_sql": generated_sql,
+                "accuracy": accuracy,
+                "elapsed_time": elapsed_time
+            }
+            
+        except Exception as e:
+            import traceback
+            return {
+                "index": index,
+                "db_id": db_id if 'db_id' in locals() else "unknown",
+                "question": nl_query if 'nl_query' in locals() else "unknown",
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "accuracy": 0,
+                "elapsed_time": -1
+            }
+    
+    # 串行执行所有测试
+    results = []
+    total_accuracy = 0
+    successful_tests = 0
+    
+    for i, query_item in enumerate(test_data):
+        print(f"测试查询 {start_index + i + 1}/{start_index + limit} ({i + 1}/{len(test_data)})")
+        result = test_single_query(query_item, start_index + i)
+        results.append(result)
+        
+        if "error" not in result:
+            total_accuracy += result["accuracy"]
+            successful_tests += 1
+            print(f"精确度: {result['accuracy']:.2f}")
+        else:
+            print(f"错误: {result['error']}")
+        
+        print("-" * 50)
+    
+    # 计算总体准确率
+    if successful_tests > 0:
+        average_accuracy = total_accuracy / successful_tests
+    else:
+        average_accuracy = 0
+    
+    # 保存详细结果
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    results_file = results_dir / f"spider_results_{timestamp}.json"
+    
+    summary = {
+        "total_queries": len(test_data),
+        "successful_queries": successful_tests,
+        "average_accuracy": average_accuracy,
+        "results": results
+    }
+    
+    with open(results_file, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n测试完成!")
+    print(f"总查询数: {len(test_data)}")
+    print(f"成功查询数: {successful_tests}")
+    print(f"平均准确率: {average_accuracy:.4f}")
+    print(f"详细结果已保存至: {results_file}")
+    
+    return summary
 
 def kickoff(dataset_path=None, dataset_type="default"):
     """
@@ -439,7 +432,6 @@ def kickoff(dataset_path=None, dataset_type="default"):
         dataset_path (str, optional): 数据集路径. Defaults to None.
         dataset_type (str, optional): 数据集类型 ("spider", "custom", "default"). Defaults to "default".
     """
-
     try:
         # 检查数据集路径
         if dataset_path and os.path.exists(dataset_path):
@@ -457,198 +449,26 @@ def kickoff(dataset_path=None, dataset_type="default"):
             "state": query_flow.state.model_dump(),
         }
         
-        if result is not None:
-            output_data.update(query_flow.serialize_crew_output(result))
+        # 保存结果
+        output_dir = Path("outputs")
+        output_dir.mkdir(exist_ok=True)
         
-        with open(f"outputs/final_result_{timestamp}.json", "w", encoding="utf-8") as f:
+        with open(output_dir / f"final_result_{timestamp}.json", "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
             
         logger.info("Query flow completed successfully")
+        
+        if query_flow.state.sql_query:
+            print("\n生成的SQL查询:")
+            print("-" * 50)
+            print(query_flow.state.sql_query)
+            print("-" * 50)
+            
+        return result
             
     except Exception as e:
         logger.error(f"Error in query flow: {str(e)}")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        try:
-            with open(f"outputs/error_{timestamp}.json", "w", encoding="utf-8") as f:
-                json.dump({
-                    "timestamp": timestamp,
-                    "error": str(e),
-                    "state": query_flow.state.model_dump() if hasattr(query_flow, 'state') else {}
-                }, f, ensure_ascii=False, indent=2)
-        except Exception as e2:
-            logger.error(f"Error saving error output: {str(e2)}")
         raise
     finally:
         if 'query_flow' in locals() and hasattr(query_flow, 'cleanup_crews'):
             query_flow.cleanup_crews()
-            
-def create_mock_dataset(output_path, dataset_type="spider"):
-    """
-    创建一个简单的测试数据集
-    
-    Args:
-        output_path (str): 输出路径
-        dataset_type (str): 数据集类型 ("spider", "custom")
-    """
-    import json
-    import os
-    from pathlib import Path
-    
-    # 创建输出目录
-    Path(output_path).mkdir(parents=True, exist_ok=True)
-    
-    if dataset_type == "spider":
-        # 创建dev.json
-        dev_data = [
-            {
-                "db_id": "customers_db",
-                "question": "查找所有客户的姓名和他们的总消费金额，按金额降序排列。",
-                "query": "SELECT c.name, SUM(o.amount) as total_amount FROM customers c JOIN orders o ON c.id = o.customer_id GROUP BY c.name ORDER BY total_amount DESC"
-            }
-        ]
-        
-        with open(os.path.join(output_path, 'dev.json'), 'w', encoding='utf-8') as f:
-            json.dump(dev_data, f, ensure_ascii=False, indent=2)
-        
-        # 创建tables.json
-        tables_data = [
-            {
-                "db_id": "customers_db",
-                "tables": [
-                    {
-                        "name": "customers",
-                        "columns": [
-                            {"name": "id", "type": "int"},
-                            {"name": "name", "type": "text"},
-                            {"name": "email", "type": "text"}
-                        ]
-                    },
-                    {
-                        "name": "orders",
-                        "columns": [
-                            {"name": "id", "type": "int"},
-                            {"name": "customer_id", "type": "int"},
-                            {"name": "amount", "type": "decimal"},
-                            {"name": "date", "type": "date"}
-                        ]
-                    }
-                ],
-                "foreign_keys": [
-                    {
-                        "from": ["orders", "customer_id"],
-                        "to": ["customers", "id"]
-                    }
-                ]
-            }
-        ]
-        
-        with open(os.path.join(output_path, 'tables.json'), 'w', encoding='utf-8') as f:
-            json.dump(tables_data, f, ensure_ascii=False, indent=2)
-        
-    elif dataset_type == "custom":
-        # 创建data.json
-        data = {
-            "query": "查找所有客户的姓名和他们的总消费金额，按金额降序排列。",
-            "schema": {
-                "tables": [
-                    {
-                        "name": "customers",
-                        "columns": [
-                            {"name": "id", "type": "int"},
-                            {"name": "name", "type": "text"},
-                            {"name": "email", "type": "text"}
-                        ]
-                    },
-                    {
-                        "name": "orders",
-                        "columns": [
-                            {"name": "id", "type": "int"},
-                            {"name": "customer_id", "type": "int"},
-                            {"name": "amount", "type": "decimal"},
-                            {"name": "date", "type": "date"}
-                        ]
-                    }
-                ],
-                "foreign_keys": [
-                    {
-                        "from": ["orders", "customer_id"],
-                        "to": ["customers", "id"]
-                    }
-                ]
-            }
-        }
-        
-        with open(os.path.join(output_path, 'data.json'), 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    logger.info(f"创建模拟{dataset_type}数据集于 {output_path}")
-
-def plot():
-    """绘制流程图"""
-    query_flow = QueryFlow()
-    try:
-        query_flow.plot()
-        logger.info("Flow plot generated successfully")
-    except Exception as e:
-        logger.error(f"Error generating flow plot: {str(e)}")
-        raise
-
-def test_with_spider(spider_dataset_path, query_index=0):
-    """使用Spider数据集中的查询测试框架"""
-    import json
-    import os
-    
-    # 从Spider开发集加载查询
-    dev_file = os.path.join(spider_dataset_path, 'dev.json')
-    if not os.path.exists(dev_file):
-        raise FileNotFoundError(f'Spider dev文件未在 {dev_file} 找到')
-    
-    with open(dev_file, 'r') as f:
-        dev_data = json.load(f)
-    
-    if not dev_data or query_index >= len(dev_data):
-        raise ValueError(f'无效的查询索引 {query_index}。数据集有 {len(dev_data)} 个查询')
-    
-    # 获取选定的查询
-    query_item = dev_data[query_index]
-    nl_query = query_item['question']
-    db_id = query_item['db_id']
-    gold_sql = query_item['query']
-    
-    # 加载相应的数据库模式
-    tables_file = os.path.join(spider_dataset_path, 'tables.json')
-    with open(tables_file, 'r') as f:
-        db_schemas = json.load(f)
-    
-    # 找到此数据库的模式
-    db_schema = None
-    for schema in db_schemas:
-        if schema['db_id'] == db_id:
-            db_schema = schema
-            break
-    
-    if not db_schema:
-        raise ValueError(f'未找到数据库 {db_id} 的模式')
-    
-    # 使用Spider数据集初始化查询流程
-    query_flow = QueryFlow(spider_dataset_path=spider_dataset_path)
-    
-    # 覆盖查询
-    query_flow.state.query = nl_query
-    query_flow.state.db_schema = db_schema
-    
-    # 设置数据库ID到状态以便SQLCrew可以访问
-    query_flow.state.db_id = db_id
-    
-    # 运行流程
-    result = query_flow.kickoff()
-    
-    # 比较结果
-    print(f'自然语言查询: {nl_query}')
-    print(f'标准SQL: {gold_sql}')
-    print(f'生成的SQL: {query_flow.state.sql_query}')
-    
-    return result
-
-if __name__ == "__main__":
-    kickoff()

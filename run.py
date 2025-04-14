@@ -1,4 +1,5 @@
-# run.py
+#!/usr/bin/env python
+# run.py - 优化版本
 import sys
 import os
 import warnings
@@ -38,8 +39,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='运行查询流程')
     parser.add_argument('--dataset-path', type=str, default=spider_dir, help='数据集路径')
     parser.add_argument('--dataset-type', type=str, default='spider', choices=['spider', 'custom', 'default'], help='数据集类型')
+    parser.add_argument('--mode', type=str, default='single', choices=['single', 'batch'], help='运行模式: 单个查询或批量测试')
+    parser.add_argument('--limit', type=int, default=10, help='批量测试时的查询数量限制')
+    parser.add_argument('--start-index', type=int, default=0, help='批量测试的起始索引')
     args = parser.parse_args()
     
-    # 使用命令行参数运行
-    from multi.main import kickoff
-    kickoff(dataset_path=args.dataset_path, dataset_type=args.dataset_type)
+    try:
+        # 根据模式运行
+        if args.mode == 'single':
+            # 单个查询模式
+            from multi.main import kickoff
+            kickoff(dataset_path=args.dataset_path, dataset_type=args.dataset_type)
+        else:
+            # 批量测试模式
+            from multi.main import batch_test_spider
+            batch_test_spider(
+                spider_dataset_path=args.dataset_path, 
+                limit=args.limit, 
+                start_index=args.start_index
+            )
+    except KeyboardInterrupt:
+        logger.info("用户中断操作")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"运行时发生错误: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        sys.exit(1)

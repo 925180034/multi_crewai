@@ -1,9 +1,12 @@
+# src/multi/crews/planner_crew/planner_crew.py - 优化版
 from pydantic import BaseModel
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, List
 from crewai import Agent, Task, Crew, Process
 from crewai.project import CrewBase, agent, crew, task
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PlanOutput(BaseModel):
     timestamp: str
@@ -13,15 +16,16 @@ class PlanOutput(BaseModel):
 
 @CrewBase
 class PlannerCrew:
-    """Planning crew for query analysis"""
+    """规划小组，分析查询并创建执行计划"""
 
     @agent
     def planner_agent(self) -> Agent:
         return Agent(
             role="Query Planner",
-            goal="Analyze user queries and create execution plans",
-            backstory="Expert at understanding user requirements and planning query execution",
-            verbose=True
+            goal="创建简洁有效的查询执行计划",
+            backstory="你是一个专业的数据查询规划专家，能够分解复杂查询为可执行步骤",
+            verbose=True,
+            max_iter=2  # 限制迭代次数提高效率
         )
 
     @task
@@ -29,11 +33,10 @@ class PlannerCrew:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         return Task(
-            description="Analyze the user query and create a plan",
-            expected_output="Query execution plan with required steps",
+            description="分析用户查询并创建执行计划。查询：{query}",
+            expected_output="详细的查询执行计划，包含必要的数据源和步骤",
             agent=self.planner_agent(),
-            output_json=PlanOutput,  # Use Pydantic model for structured output
-            output_file=f"outputs/planner_task_{timestamp}.md"
+            output_json=PlanOutput  # 使用结构化输出
         )
 
     @crew
@@ -42,6 +45,5 @@ class PlannerCrew:
             agents=[self.planner_agent()],
             tasks=[self.planning_task()],
             process=Process.sequential,
-            verbose=True,
-            full_output=True  # Enable full output capturing
+            verbose=True
         )

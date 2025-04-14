@@ -1,8 +1,9 @@
-# src/multi/crews/sql_crew/sql_crew.py
+# src/multi/crews/sql_crew/sql_crew.py - 优化版
 from crewai import Agent, Crew, Task, Process
 from crewai.project import CrewBase, agent, crew, task
 import logging
-
+import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -10,30 +11,22 @@ logger = logging.getLogger(__name__)
 class SQLCrew:
     """SQL生成小组，将自然语言查询转换为SQL语句"""
     
-    # 配置文件路径
     agents_config = "config/agents.yaml"
     tasks_config = "config/tasks.yaml"
-    # 初始化日志记录器
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO)
 
     def __init__(self, spider_dataset_path=None):
         """使用Spider数据集路径初始化SQL小组"""
         super().__init__()
         self.spider_dataset_path = spider_dataset_path
-        logger.info(f'SQLCrew初始化，Spider数据集路径: {self.spider_dataset_path}')
+        self.db_schemas = []
         
         # 如果提供了Spider数据集路径，加载数据库模式
-        self.db_schemas = []
-        if self.spider_dataset_path:
+        if self.spider_dataset_path and os.path.exists(self.spider_dataset_path):
             self.load_spider_schemas()
     
     def load_spider_schemas(self):
         """加载Spider数据库模式"""
         try:
-            import json
-            import os
-            
             # 从Spider数据集加载数据库模式
             schema_path = os.path.join(self.spider_dataset_path, 'tables.json')
             if os.path.exists(schema_path):
@@ -51,20 +44,21 @@ class SQLCrew:
     def sql_generator_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["sql_generator_agent"],
+            max_iter=2,  # 降低迭代次数提高效率
+            verbose=True
         )
 
     @task
     def generate_sql(self) -> Task:
         return Task(
-            config=self.tasks_config["generate_sql"],
+            config=self.tasks_config["generate_sql"]
         )
 
     @crew
     def crew(self) -> Crew:
-        """Creates the SQL Generation Crew"""
         return Crew(
-            agents=self.agents,  # Automatically created by the @agent decorator
-            tasks=self.tasks,    # Automatically created by the @task decorator
+            agents=self.agents,
+            tasks=self.tasks,
             process=Process.sequential,
-            verbose=True,
+            verbose=True
         )

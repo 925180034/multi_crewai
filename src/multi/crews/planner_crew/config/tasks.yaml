@@ -1,23 +1,13 @@
-# src/multi/crews/planner_crew/config/tasks.yaml
-plan_execution:
+planning_task:
   description: >
-    Analyze the provided query and create a detailed, step-by-step execution plan.
-    Consider the following aspects:
-    1. Required data sources and their relationships
-    2. Optimal sequence of operations
-    3. Potential optimization strategies
-    4. Data validation requirements
-    5. Expected output format
-    
-    For each query component, identify dependencies, access patterns, and potential bottlenecks.
-    Structure your plan to maximize parallel processing where possible while maintaining data integrity.
-    
+    Analyze the user's query and create an execution plan:
+    1. Identify the required data sources
+    2. Determine the query execution order
+    3. Identify possible optimization opportunities
+
     Query: {query}
   expected_output: >
-    A comprehensive execution plan that includes:
-    1. Query analysis breakdown
-    2. Data source identification
-    3. Detailed execution steps with dependencies
-    4. Potential optimization strategies
-    5. Expected intermediate outputs
-    6. Validation checkpoints
+    A clear query execution plan, including:
+    1. Required data sources
+    2. Query execution steps
+    3. Expected output format
