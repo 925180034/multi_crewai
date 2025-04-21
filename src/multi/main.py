@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-# 文件：src/multi/main.py 的优化版本
+# Improved src/multi/main.py - Enhanced for Spider dataset evaluation
 import json
 import os
 import time
 import re
 import logging
+import traceback
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
-
+from typing import Optional, Dict, Any, List, Tuple
 
 from crewai.flow.flow import Flow, listen, start
 
@@ -18,15 +19,15 @@ from multi.crews.retrieval_crew.retrieval_crew import RetrievalCrew
 from multi.crews.matcher_crew.matcher_crew import MatcherCrew  
 from multi.crews.sql_crew.sql_crew import SQLCrew
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-# litellm.set_verbose = True
+
 class QueryState(BaseModel):
-    """查询状态模型，增强版"""
+    """Enhanced query state model"""
     query: str = ""
     plan: str = ""
     db_data: str = ""
@@ -42,140 +43,226 @@ class QueryState(BaseModel):
     # Spider-specific fields
     db_schema: Optional[Dict[str, Any]] = None
     db_id: str = ""
-    gold_sql: str = ""  # 参考SQL（从Spider获取）
+    gold_sql: str = ""  # Reference SQL from Spider
+    execution_results: Optional[Dict[str, Any]] = None
 
 class QueryFlow(Flow[QueryState]):
-    """查询处理流程，简化版"""
+    """Enhanced query processing flow"""
     
     def __init__(self, dataset_path=None, dataset_type="default"):
-        """初始化查询流程"""
+        """Initialize query flow with better cleanup"""
         super().__init__()
         self.output_dir = Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
         
-        # 存储数据集信息
+        # Store dataset info
         self.dataset_path = dataset_path
         self.dataset_type = dataset_type
         
-        # 初始化crews
+        # Initialize crews with proper tracking for cleanup
         self.planner_crew = None
         self.retrieval_crew = None
         self.matcher_crew = None
         self.sql_crew = None
         
-        # 立即初始化所有crews
+        # Immediately initialize all crews
         self._initialize_crews()
+        
+        # Add timestamp for tracking execution time
+        self.state.execution_start = datetime.now()
 
     def _initialize_crews(self):
-        """初始化所有crews，简化逻辑"""
+        """Initialize all crews with better error handling"""
         try:
             self.planner_crew = PlannerCrew()
+            logger.info("Planner crew initialized")
+            
             self.retrieval_crew = RetrievalCrew(dataset_path=self.dataset_path)
+            logger.info("Retrieval crew initialized")
+            
             self.matcher_crew = MatcherCrew()
+            logger.info("Matcher crew initialized")
+            
             self.sql_crew = SQLCrew(spider_dataset_path=self.dataset_path)
-            logger.info("所有crews初始化完成")
+            logger.info("SQL crew initialized")
+            
+            logger.info("All crews initialized successfully")
         except Exception as e:
-            logger.error(f"初始化crews失败: {str(e)}")
+            logger.error(f"Failed to initialize crews: {str(e)}")
+            logger.error(traceback.format_exc())
             raise
 
     def cleanup_crews(self):
-        """清理所有crews的资源"""
+        """Enhanced cleanup of all crews' resources"""
         try:
-            if hasattr(self.retrieval_crew, 'cleanup'):
-                self.retrieval_crew.cleanup()
-            # 其他清理逻辑...
+            # Add a specific cleanup order
+            if hasattr(self.retrieval_crew, 'cleanup') and self.retrieval_crew is not None:
+                try:
+                    self.retrieval_crew.cleanup()
+                    logger.info("Retrieval crew cleaned up")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up retrieval crew: {str(e)}")
+            
+            # Add explicit cleanup for other crews if they implement cleanup methods
+            for crew_name, crew in [
+                ("planner_crew", self.planner_crew),
+                ("matcher_crew", self.matcher_crew),
+                ("sql_crew", self.sql_crew)
+            ]:
+                if crew is not None and hasattr(crew, 'cleanup'):
+                    try:
+                        crew.cleanup()
+                        logger.info(f"{crew_name} cleaned up")
+                    except Exception as e:
+                        logger.warning(f"Error cleaning up {crew_name}: {str(e)}")
+                        
+            # Set all crews to None to help garbage collection
+            self.planner_crew = None
+            self.retrieval_crew = None
+            self.matcher_crew = None
+            self.sql_crew = None
+            
+            logger.info("All crews cleaned up")
         except Exception as e:
-            logger.error(f"清理crews资源失败: {str(e)}")
+            logger.error(f"Error in cleanup_crews: {str(e)}")
 
     @start()
     def process_query(self):
-        """处理初始查询，简化逻辑"""
+        """Process initial query with better error handling"""
         try:
-            # 加载数据
+            # Record start time
+            self.state.execution_start = datetime.now()
+            self.state.status = "processing"
+            
+            # Load data
             self._load_query_data()
-            logger.info(f"使用查询: {self.state.query}")
+            logger.info(f"Processing query: {self.state.query}")
         except Exception as e:
-            logger.error(f"处理查询失败: {str(e)}")
+            error_msg = f"Error processing query: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
+            self.state.status = "error"
             raise
 
     def _load_query_data(self):
-        """加载查询数据，封装逻辑"""
-        # 从Spider数据集加载
+        """Load query data with improved dataset handling"""
+        # From Spider dataset
         if self.dataset_path and self.dataset_type == "spider":
             self._load_from_spider()
-        # 从自定义数据集加载
+        # From custom dataset
         elif self.dataset_path and self.dataset_type == "custom":
             self._load_from_custom()
-        # 使用默认查询
+        # Use default query
         else:
-            self.state.query = "查找所有客户的姓名和他们的总消费金额，按金额降序排列。"
+            self.state.query = "Find all customers' names and their total spending, ordered by amount in descending order."
 
     def _load_from_spider(self):
-        """从Spider数据集加载查询"""
+        """Load from Spider dataset with better error handling"""
         try:
-            import json
+            # Check if dataset path exists
+            if not os.path.exists(self.dataset_path):
+                raise FileNotFoundError(f"Spider dataset path not found: {self.dataset_path}")
             
-            # 加载查询
+            # Load dev.json
             dev_file = os.path.join(self.dataset_path, 'dev.json')
-            with open(dev_file, 'r') as f:
+            if not os.path.exists(dev_file):
+                raise FileNotFoundError(f"Spider dev file not found: {dev_file}")
+                
+            with open(dev_file, 'r', encoding='utf-8') as f:
                 queries = json.load(f)
             
-            if queries and len(queries) > 0:
-                # 使用第一个查询
-                self.state.query = queries[0]['question']
-                self.state.db_id = queries[0]['db_id']
+            if not queries or len(queries) < 1:
+                raise ValueError("No queries found in Spider dev file")
                 
-                # 加载数据库模式
-                tables_file = os.path.join(self.dataset_path, 'tables.json')
-                with open(tables_file, 'r') as f:
-                    schemas = json.load(f)
+            # Use first query
+            self.state.query = queries[0]['question']
+            self.state.db_id = queries[0]['db_id']
+            self.state.gold_sql = queries[0].get('query', '')
+            
+            # Load database schema
+            tables_file = os.path.join(self.dataset_path, 'tables.json')
+            if not os.path.exists(tables_file):
+                raise FileNotFoundError(f"Spider tables file not found: {tables_file}")
                 
-                # 查找对应的模式
-                for schema in schemas:
-                    if schema['db_id'] == self.state.db_id:
-                        self.state.db_schema = schema
-                        break
+            with open(tables_file, 'r', encoding='utf-8') as f:
+                schemas = json.load(f)
+            
+            # Find matching schema
+            found_schema = False
+            for schema in schemas:
+                if schema['db_id'] == self.state.db_id:
+                    self.state.db_schema = schema
+                    found_schema = True
+                    break
+            
+            if not found_schema:
+                logger.warning(f"Schema not found for db_id: {self.state.db_id}")
+                
+            logger.info(f"Successfully loaded query from Spider dataset, db_id: {self.state.db_id}")
         except Exception as e:
-            logger.error(f"从Spider加载数据失败: {str(e)}")
+            error_msg = f"Failed to load from Spider: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
             raise
 
     def _load_from_custom(self):
-        """从自定义数据集加载查询"""
+        """Load from custom dataset with better error handling"""
         try:
-            import json
-            
+            if not os.path.exists(self.dataset_path):
+                raise FileNotFoundError(f"Custom dataset path not found: {self.dataset_path}")
+                
             data_file = os.path.join(self.dataset_path, 'data.json')
-            with open(data_file, 'r') as f:
+            if not os.path.exists(data_file):
+                raise FileNotFoundError(f"Custom data file not found: {data_file}")
+                
+            with open(data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            if 'query' in data:
-                self.state.query = data['query']
-                self.state.db_schema = data.get('schema', {})
+            if 'query' not in data:
+                raise ValueError("No query found in custom dataset")
+                
+            self.state.query = data['query']
+            self.state.db_schema = data.get('schema', {})
+            logger.info(f"Successfully loaded query from custom dataset")
         except Exception as e:
-            logger.error(f"从自定义数据集加载失败: {str(e)}")
+            error_msg = f"Failed to load from custom dataset: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
             raise
 
     @listen(process_query)
     def create_plan(self):
-        """创建执行计划，简化错误处理"""
+        """Create execution plan with better error handling"""
+        if self.state.error:
+            logger.warning(f"Skipping create_plan due to error: {self.state.error}")
+            return
+            
         try:
+            self.state.step_metrics['create_plan_start'] = datetime.now()
             result = self.planner_crew.crew().kickoff(
                 inputs={"query": self.state.query}
             )
             self.state.plan = result.raw if hasattr(result, 'raw') else str(result)
-            logger.info("计划创建成功")
+            self.state.step_metrics['create_plan_end'] = datetime.now()
+            logger.info("Plan created successfully")
         except Exception as e:
-            logger.error(f"创建计划失败: {str(e)}")
-            self.state.error = f"创建计划失败: {str(e)}"
+            error_msg = f"Failed to create plan: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
 
     @listen(create_plan)
     def retrieve_data(self):
-        """检索数据，简化错误处理"""
+        """Retrieve data with better error handling"""
         if self.state.error:
-            logger.warning(f"跳过数据检索，因为存在错误: {self.state.error}")
+            logger.warning(f"Skipping retrieve_data due to error: {self.state.error}")
             return
             
         try:
+            self.state.step_metrics['retrieve_data_start'] = datetime.now()
             result = self.retrieval_crew.crew().kickoff(
                 inputs={
                     "query": self.state.query,
@@ -183,25 +270,29 @@ class QueryFlow(Flow[QueryState]):
                 }
             )
             
-            # 处理结果
+            # Process results
             if hasattr(result, 'tasks_output'):
                 self.state.db_data = result.tasks_output[0].raw if len(result.tasks_output) > 0 else ""
                 self.state.web_data = result.tasks_output[1].raw if len(result.tasks_output) > 1 else ""
                 self.state.doc_data = result.tasks_output[2].raw if len(result.tasks_output) > 2 else ""
             
-            logger.info("数据检索成功")
+            self.state.step_metrics['retrieve_data_end'] = datetime.now()
+            logger.info("Data retrieved successfully")
         except Exception as e:
-            logger.error(f"数据检索失败: {str(e)}")
-            self.state.error = f"数据检索失败: {str(e)}"
+            error_msg = f"Failed to retrieve data: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
 
     @listen(retrieve_data)
     def match_schemas(self):
-        """匹配数据模式，简化错误处理"""
+        """Match schemas with better error handling"""
         if self.state.error:
-            logger.warning(f"跳过模式匹配，因为存在错误: {self.state.error}")
+            logger.warning(f"Skipping match_schemas due to error: {self.state.error}")
             return
             
         try:
+            self.state.step_metrics['match_schemas_start'] = datetime.now()
             result = self.matcher_crew.crew().kickoff(
                 inputs={
                     "query": self.state.query,
@@ -211,31 +302,46 @@ class QueryFlow(Flow[QueryState]):
                 }
             )
             self.state.schema_matches = result.raw if hasattr(result, 'raw') else str(result)
-            logger.info("模式匹配成功")
+            self.state.step_metrics['match_schemas_end'] = datetime.now()
+            logger.info("Schemas matched successfully")
         except Exception as e:
-            logger.error(f"模式匹配失败: {str(e)}")
-            self.state.error = f"模式匹配失败: {str(e)}"
+            error_msg = f"Failed to match schemas: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
 
     @listen(match_schemas)
     def generate_sql(self):
-        """生成SQL查询，简化错误处理"""
+        """Generate SQL with better error handling and database schema integration"""
         if self.state.error:
-            logger.warning(f"跳过SQL生成，因为存在错误: {self.state.error}")
+            logger.warning(f"Skipping SQL generation due to error: {self.state.error}")
             return
             
         try:
-            # 准备数据库模式信息
+            self.state.step_metrics['generate_sql_start'] = datetime.now()
+            
+            # Prepare database schema information
             db_schema_info = ""
             db_id = ""
             
-            # 使用db_schema或从SQL crew加载
+            # Use db_schema or load from SQL crew
             if hasattr(self.state, 'db_schema') and self.state.db_schema:
                 db_schema_info = json.dumps(self.state.db_schema, ensure_ascii=False, indent=2)
                 if hasattr(self.state, 'db_id'):
                     db_id = self.state.db_id
             elif self.sql_crew and hasattr(self.sql_crew, 'db_schemas') and self.sql_crew.db_schemas:
-                db_schema_info = json.dumps(self.sql_crew.db_schemas[0], ensure_ascii=False, indent=2)
-                db_id = self.sql_crew.db_schemas[0].get('db_id', '')
+                # Find the correct schema for this db_id if available
+                if hasattr(self.state, 'db_id') and self.state.db_id:
+                    for schema in self.sql_crew.db_schemas:
+                        if schema.get('db_id') == self.state.db_id:
+                            db_schema_info = json.dumps(schema, ensure_ascii=False, indent=2)
+                            db_id = self.state.db_id
+                            break
+                
+                # Fallback to first schema if no matching schema found
+                if not db_schema_info and self.sql_crew.db_schemas:
+                    db_schema_info = json.dumps(self.sql_crew.db_schemas[0], ensure_ascii=False, indent=2)
+                    db_id = self.sql_crew.db_schemas[0].get('db_id', '')
             
             result = self.sql_crew.crew().kickoff(
                 inputs={
@@ -245,231 +351,497 @@ class QueryFlow(Flow[QueryState]):
                     "schema_matches": self.state.schema_matches
                 }
             )
+            
             self.state.sql_query = result.raw if hasattr(result, 'raw') else str(result)
-            logger.info("SQL生成成功")
+            
+            # Clean up the SQL (remove explanations or headers)
+            self.state.sql_query = self._extract_sql_query(self.state.sql_query)
+            
+            self.state.step_metrics['generate_sql_end'] = datetime.now()
+            self.state.execution_end = datetime.now()
+            self.state.status = "completed"
+            
+            logger.info("SQL generated successfully")
         except Exception as e:
-            logger.error(f"SQL生成失败: {str(e)}")
-            self.state.error = f"SQL生成失败: {str(e)}"
+            error_msg = f"Failed to generate SQL: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.state.error = error_msg
+            self.state.status = "error"
+            self.state.execution_end = datetime.now()
 
-def evaluate_sql(generated_sql, gold_sql, db_path=None):
-    """
-    评估生成的SQL与标准SQL的相似度
-    
-    Args:
-        generated_sql: 生成的SQL
-        gold_sql: 标准SQL
-        db_path: 数据库路径(可选)
+    def _extract_sql_query(self, raw_output):
+        """Extract clean SQL query from raw output text"""
+        # Search for SQL enclosed in triple backticks
+        sql_pattern = r"```sql\s*(.*?)\s*```"
+        sql_match = re.search(sql_pattern, raw_output, re.DOTALL)
+        if sql_match:
+            return sql_match.group(1).strip()
         
-    Returns:
-        float: 相似度得分(0-1)
-    """
-    # 简单的字符串比较
-    if generated_sql.strip().lower() == gold_sql.strip().lower():
-        return 1.0
+        # Search for any code blocks
+        code_pattern = r"```(.*?)```"
+        code_match = re.search(code_pattern, raw_output, re.DOTALL)
+        if code_match:
+            return code_match.group(1).strip()
+        
+        # Try to find SQL keywords and extract the SQL statement
+        sql_keywords = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP"]
+        lines = raw_output.split('\n')
+        for i, line in enumerate(lines):
+            for keyword in sql_keywords:
+                if line.strip().upper().startswith(keyword):
+                    # Extract from this line until a blank line or end
+                    sql_lines = []
+                    j = i
+                    while j < len(lines) and lines[j].strip():
+                        sql_lines.append(lines[j])
+                        j += 1
+                    return ' '.join([l.strip() for l in sql_lines])
+        
+        # If no clear SQL is found, return the raw output
+        return raw_output.strip()
+
+def execute_sql(sql_query, db_path):
+    """Execute SQL query and get results"""
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database file not found: {db_path}")
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(sql_query)
+        results = cursor.fetchall()
+        column_names = [description[0] for description in cursor.description] if cursor.description else []
+        conn.close()
+        
+        return {
+            "success": True,
+            "results": results,
+            "columns": column_names
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+def evaluate_sql_execution(generated_sql, gold_sql, db_path):
+    """Evaluate SQL by executing both queries and comparing results"""
+    if not os.path.exists(db_path):
+        return (0.0, f"Database file not found: {db_path}")
     
-    # 基本的结构化比较 (移除空格、大小写等差异)
+    try:
+        # Execute generated SQL
+        generated_results = execute_sql(generated_sql, db_path)
+        
+        # Execute gold SQL
+        gold_results = execute_sql(gold_sql, db_path)
+        
+        # Check for execution errors
+        if not generated_results.get("success", False):
+            return (0.0, f"Generated SQL execution error: {generated_results.get('error', 'Unknown error')}")
+            
+        if not gold_results.get("success", False):
+            return (0.0, f"Gold SQL execution error: {gold_results.get('error', 'Unknown error')}")
+        
+        # Compare results
+        gen_results = generated_results.get("results", [])
+        gold_results = gold_results.get("results", [])
+        
+        # Sort results for consistent comparison
+        gen_results = sorted([tuple(row) for row in gen_results])
+        gold_results = sorted([tuple(row) for row in gold_results])
+        
+        # Check if results match
+        if gen_results == gold_results:
+            return (1.0, "Execution results match")
+        
+        # Partial match - check if returned columns match
+        gen_cols = set(generated_results.get("columns", []))
+        gold_cols = set(gold_results.get("columns", []))
+        
+        if gen_cols == gold_cols:
+            return (0.5, "Column names match but data differs")
+            
+        # Calculate overlap of results
+        if len(gen_results) > 0 and len(gold_results) > 0:
+            common_rows = set(gen_results).intersection(set(gold_results))
+            if common_rows:
+                overlap = len(common_rows) / max(len(gen_results), len(gold_results))
+                return (overlap, f"Partial match: {len(common_rows)} rows match out of {max(len(gen_results), len(gold_results))}")
+        
+        return (0.0, "Results do not match")
+    except Exception as e:
+        return (0.0, f"Evaluation error: {str(e)}")
+
+def evaluate_sql_structure(generated_sql, gold_sql):
+    """Improved evaluation of SQL structure with normalization and component matching"""
+    if not generated_sql or not gold_sql:
+        return (0.0, "Empty SQL query")
+    
     def normalize_sql(sql):
-        sql = sql.lower().strip()
-        sql = re.sub(r'\s+', ' ', sql)
-        sql = re.sub(r'`', '', sql)
-        sql = re.sub(r'"', '', sql)
-        sql = re.sub(r'\'', '', sql)
+        """Normalize SQL for better comparison"""
+        # Convert to lowercase
+        sql = sql.lower()
+        
+        # Remove extra whitespace
+        sql = re.sub(r'\s+', ' ', sql.strip())
+        
+        # Remove quotes around identifiers
+        sql = re.sub(r'["`\']([^"`\']+)["`\']', r'\1', sql)
+        
+        # Normalize JOIN syntax
+        sql = re.sub(r'join\s+', ' join ', sql)
+        
         return sql
     
+    def extract_components(sql):
+        """Extract key components from SQL query"""
+        # Basic extraction of SQL components
+        components = {
+            "select": [],
+            "from": [],
+            "where": [],
+            "group_by": [],
+            "order_by": [],
+            "limit": None
+        }
+        
+        # Extract SELECT clause
+        select_match = re.search(r'select\s+(.*?)\s+from', sql, re.IGNORECASE | re.DOTALL)
+        if select_match:
+            select_items = select_match.group(1).split(',')
+            components["select"] = [item.strip() for item in select_items]
+        
+        # Extract FROM clause
+        from_match = re.search(r'from\s+(.*?)(?:\s+where|\s+group\s+by|\s+order\s+by|\s+limit|$)', sql, re.IGNORECASE | re.DOTALL)
+        if from_match:
+            from_items = from_match.group(1).split(',')
+            components["from"] = [item.strip() for item in from_items]
+        
+        # Extract WHERE clause
+        where_match = re.search(r'where\s+(.*?)(?:\s+group\s+by|\s+order\s+by|\s+limit|$)', sql, re.IGNORECASE | re.DOTALL)
+        if where_match:
+            where_conditions = where_match.group(1).split('and')
+            components["where"] = [cond.strip() for cond in where_conditions]
+        
+        # Extract GROUP BY clause
+        group_by_match = re.search(r'group\s+by\s+(.*?)(?:\s+having|\s+order\s+by|\s+limit|$)', sql, re.IGNORECASE | re.DOTALL)
+        if group_by_match:
+            group_by_items = group_by_match.group(1).split(',')
+            components["group_by"] = [item.strip() for item in group_by_items]
+        
+        # Extract ORDER BY clause
+        order_by_match = re.search(r'order\s+by\s+(.*?)(?:\s+limit|$)', sql, re.IGNORECASE | re.DOTALL)
+        if order_by_match:
+            order_by_items = order_by_match.group(1).split(',')
+            components["order_by"] = [item.strip() for item in order_by_items]
+        
+        # Extract LIMIT clause
+        limit_match = re.search(r'limit\s+(\d+)', sql, re.IGNORECASE)
+        if limit_match:
+            components["limit"] = limit_match.group(1)
+        
+        return components
+    
+    # Normalize SQL queries
     norm_generated = normalize_sql(generated_sql)
     norm_gold = normalize_sql(gold_sql)
     
+    # Exact match after normalization
     if norm_generated == norm_gold:
-        return 0.9
+        return (1.0, "Exact match after normalization")
     
-    # 检查关键词和表名是否匹配
-    gold_tokens = set(re.findall(r'\b\w+\b', norm_gold))
-    generated_tokens = set(re.findall(r'\b\w+\b', norm_generated))
+    # Extract and compare components
+    gen_components = extract_components(norm_generated)
+    gold_components = extract_components(norm_gold)
     
-    # 计算tokens的重叠度
-    common_tokens = gold_tokens.intersection(generated_tokens)
-    if len(gold_tokens) > 0:
-        token_overlap = len(common_tokens) / len(gold_tokens)
-    else:
-        token_overlap = 0
+    # Calculate component matches
+    component_scores = []
+    
+    for component, gold_items in gold_components.items():
+        gen_items = gen_components[component]
         
-    # 如果数据库路径存在，可以尝试执行SQL验证结果是否相同
-    # 注意：这是更复杂的评估，可能需要专门的工具
+        # Skip empty components
+        if not gold_items:
+            continue
+            
+        if component == "limit":
+            # Direct comparison for limit
+            component_scores.append(1.0 if gen_items == gold_items else 0.0)
+        else:
+            # Set comparison for lists, accounting for ordering differences
+            if not gen_items:
+                component_scores.append(0.0)
+            else:
+                gold_set = set(str(item) for item in gold_items)
+                gen_set = set(str(item) for item in gen_items)
+                
+                if gold_set and gen_set:
+                    # Calculate Jaccard similarity
+                    overlap = len(gold_set.intersection(gen_set))
+                    union = len(gold_set.union(gen_set))
+                    score = overlap / union if union > 0 else 0.0
+                    component_scores.append(score)
+                else:
+                    component_scores.append(0.0)
     
-    return token_overlap * 0.8  # 降低权重，因为这只是基于token的简单对比
+    # Calculate overall score
+    if component_scores:
+        overall_score = sum(component_scores) / len(component_scores)
+        return (overall_score, f"Component similarity: {overall_score:.2f}")
+    else:
+        return (0.0, "No matching components found")
+
+def evaluate_sql(generated_sql, gold_sql, db_path=None):
+    """
+    Comprehensive SQL evaluation combining structure and execution methods
+    
+    Args:
+        generated_sql: Generated SQL query
+        gold_sql: Reference SQL query
+        db_path: Path to the database file (optional)
+        
+    Returns:
+        dict: Evaluation results
+    """
+    results = {
+        "structure_score": 0.0,
+        "execution_score": 0.0,
+        "combined_score": 0.0,
+        "structure_details": "",
+        "execution_details": "",
+        "status": "success"
+    }
+    
+    try:
+        # Evaluate SQL structure
+        structure_score, structure_details = evaluate_sql_structure(generated_sql, gold_sql)
+        results["structure_score"] = structure_score
+        results["structure_details"] = structure_details
+        
+        # Evaluate SQL execution if database is available
+        if db_path and os.path.exists(db_path):
+            execution_score, execution_details = evaluate_sql_execution(generated_sql, gold_sql, db_path)
+            results["execution_score"] = execution_score
+            results["execution_details"] = execution_details
+            
+            # Combined score (weighted more towards execution)
+            results["combined_score"] = (structure_score * 0.4) + (execution_score * 0.6)
+        else:
+            # If no database, use structure score only
+            results["execution_details"] = "No database available for execution testing"
+            results["combined_score"] = structure_score
+    except Exception as e:
+        results["status"] = "error"
+        results["error"] = str(e)
+    
+    return results
 
 def batch_test_spider(spider_dataset_path, limit=10, start_index=0):
     """
-    批量测试Spider数据集查询
+    Enhanced batch testing on Spider dataset with better progress reporting and resource management
     
     Args:
-        spider_dataset_path: Spider数据集路径
-        limit: 测试查询数量
-        start_index: 起始索引
+        spider_dataset_path: Path to the Spider dataset
+        limit: Maximum number of queries to test
+        start_index: Starting index for testing
         
     Returns:
-        dict: 测试结果摘要
+        dict: Test results summary
     """
-    # 加载Spider数据集
+    # Create output directories
+    results_dir = Path("outputs/spider_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Store execution start time
+    batch_start_time = time.time()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Load Spider dataset
     dev_file = os.path.join(spider_dataset_path, 'dev.json')
     if not os.path.exists(dev_file):
-        raise FileNotFoundError(f'Spider dev文件未在 {dev_file} 找到')
+        raise FileNotFoundError(f'Spider dev file not found: {dev_file}')
     
-    with open(dev_file, 'r') as f:
+    with open(dev_file, 'r', encoding='utf-8') as f:
         dev_data = json.load(f)
     
-    # 限制测试数量
+    # Load tables.json for schema info
+    tables_file = os.path.join(spider_dataset_path, 'tables.json')
+    if not os.path.exists(tables_file):
+        raise FileNotFoundError(f'Spider tables file not found: {tables_file}')
+        
+    with open(tables_file, 'r', encoding='utf-8') as f:
+        tables_data = json.load(f)
+    
+    # Organize schemas by db_id for quick lookup
+    schemas_by_id = {}
+    for schema in tables_data:
+        schemas_by_id[schema['db_id']] = schema
+    
+    # Limit test data
     if limit <= 0 or limit > len(dev_data):
         limit = len(dev_data)
     
     test_data = dev_data[start_index:start_index + limit]
+    logger.info(f"Running tests for {len(test_data)} queries from index {start_index} to {start_index + len(test_data) - 1}")
     
-    # 创建结果目录
-    results_dir = Path("outputs/spider_results")
-    results_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 测试单个查询
-    def test_single_query(query_item, index):
-        try:
-            start_time = time.time()
-            
-            nl_query = query_item['question']
-            db_id = query_item['db_id']
-            gold_sql = query_item['query']
-            
-            # 初始化查询流程
-            query_flow = QueryFlow(dataset_path=spider_dataset_path, dataset_type="spider")
-            
-            # 覆盖查询
-            query_flow.state.query = nl_query
-            query_flow.state.db_id = db_id
-            
-            # 运行流程
-            result = query_flow.kickoff()
-            
-            # 获取生成的SQL
-            generated_sql = query_flow.state.sql_query
-            
-            # 评估结果
-            accuracy = evaluate_sql(generated_sql, gold_sql)
-            
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            return {
-                "index": index,
-                "db_id": db_id,
-                "question": nl_query,
-                "gold_sql": gold_sql,
-                "generated_sql": generated_sql,
-                "accuracy": accuracy,
-                "elapsed_time": elapsed_time
-            }
-            
-        except Exception as e:
-            import traceback
-            return {
-                "index": index,
-                "db_id": db_id if 'db_id' in locals() else "unknown",
-                "question": nl_query if 'nl_query' in locals() else "unknown",
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-                "accuracy": 0,
-                "elapsed_time": -1
-            }
-    
-    # 串行执行所有测试
+    # Initialize results
     results = []
-    total_accuracy = 0
+    total_structure_score = 0
+    total_execution_score = 0
+    total_combined_score = 0
     successful_tests = 0
     
+    # Test each query
     for i, query_item in enumerate(test_data):
-        print(f"测试查询 {start_index + i + 1}/{start_index + limit} ({i + 1}/{len(test_data)})")
-        result = test_single_query(query_item, start_index + i)
-        results.append(result)
+        query_start_time = time.time()
+        nl_query = query_item['question']
+        db_id = query_item['db_id']
+        gold_sql = query_item['query']
         
-        if "error" not in result:
-            total_accuracy += result["accuracy"]
-            successful_tests += 1
-            print(f"精确度: {result['accuracy']:.2f}")
-        else:
-            print(f"错误: {result['error']}")
+        # Find database path
+        db_path = os.path.join(spider_dataset_path, 'database', db_id, f'{db_id}.sqlite')
         
-        print("-" * 50)
+        # Progress report
+        print(f"\n{'='*80}")
+        print(f"Processing query {start_index + i + 1}/{start_index + len(test_data)} ({i + 1}/{len(test_data)})")
+        print(f"Database: {db_id}")
+        print(f"Query: {nl_query}")
+        print(f"Gold SQL: {gold_sql}")
+        print(f"{'-'*80}")
+        
+        # Store query results
+        query_result = {
+            "index": start_index + i,
+            "db_id": db_id,
+            "question": nl_query,
+            "gold_sql": gold_sql,
+            "generated_sql": "",
+            "evaluation": {},
+            "elapsed_time": 0,
+            "error": None
+        }
+        
+        try:
+            # Initialize flow
+            query_flow = QueryFlow(dataset_path=spider_dataset_path, dataset_type="spider")
+            
+            # Set query state
+            query_flow.state.query = nl_query
+            query_flow.state.db_id = db_id
+            query_flow.state.gold_sql = gold_sql
+            
+            # Load schema
+            if db_id in schemas_by_id:
+                query_flow.state.db_schema = schemas_by_id[db_id]
+            
+            # Run flow
+            logger.info(f"Starting flow for query {start_index + i + 1}")
+            flow_result = query_flow.kickoff()
+            
+            # Get generated SQL
+            generated_sql = query_flow.state.sql_query
+            query_result["generated_sql"] = generated_sql
+            
+            # Evaluate SQL
+            if os.path.exists(db_path):
+                evaluation_result = evaluate_sql(generated_sql, gold_sql, db_path)
+            else:
+                logger.warning(f"Database file not found: {db_path}, skipping execution evaluation")
+                evaluation_result = evaluate_sql(generated_sql, gold_sql)
+            
+            query_result["evaluation"] = evaluation_result
+            
+            # Update scores
+            if evaluation_result["status"] == "success":
+                total_structure_score += evaluation_result["structure_score"]
+                total_execution_score += evaluation_result["execution_score"]
+                total_combined_score += evaluation_result["combined_score"]
+                successful_tests += 1
+            
+            # Print progress
+            print(f"Generated SQL: {generated_sql}")
+            print(f"Structure Score: {evaluation_result['structure_score']:.2f}")
+            print(f"Execution Score: {evaluation_result['execution_score']:.2f}")
+            print(f"Combined Score: {evaluation_result['combined_score']:.2f}")
+            
+        except Exception as e:
+            error_msg = f"Error processing query {start_index + i + 1}: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            query_result["error"] = error_msg
+            print(f"ERROR: {error_msg}")
+        finally:
+            # Clean up resources
+            if 'query_flow' in locals() and hasattr(query_flow, 'cleanup_crews'):
+                query_flow.cleanup_crews()
+            
+            # Calculate elapsed time
+            query_end_time = time.time()
+            query_elapsed_time = query_end_time - query_start_time
+            query_result["elapsed_time"] = query_elapsed_time
+            
+            print(f"Time: {query_elapsed_time:.2f} seconds")
+            print(f"{'='*80}")
+            
+            # Save incremental results
+            results.append(query_result)
+            
+            # Save after each query to avoid losing results
+            incremental_summary = {
+                "timestamp": timestamp,
+                "total_queries": len(test_data),
+                "processed_queries": i + 1,
+                "successful_queries": successful_tests,
+                "average_structure_score": total_structure_score / successful_tests if successful_tests > 0 else 0,
+                "average_execution_score": total_execution_score / successful_tests if successful_tests > 0 else 0,
+                "average_combined_score": total_combined_score / successful_tests if successful_tests > 0 else 0,
+                "results": results
+            }
+            
+            incremental_file = results_dir / f"spider_results_{timestamp}_incremental.json"
+            with open(incremental_file, 'w', encoding='utf-8') as f:
+                json.dump(incremental_summary, f, ensure_ascii=False, indent=2)
     
-    # 计算总体准确率
+    # Calculate batch elapsed time
+    batch_end_time = time.time()
+    batch_elapsed_time = batch_end_time - batch_start_time
+    
+    # Create final summary
     if successful_tests > 0:
-        average_accuracy = total_accuracy / successful_tests
+        average_structure_score = total_structure_score / successful_tests
+        average_execution_score = total_execution_score / successful_tests
+        average_combined_score = total_combined_score / successful_tests
     else:
-        average_accuracy = 0
-    
-    # 保存详细结果
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    results_file = results_dir / f"spider_results_{timestamp}.json"
+        average_structure_score = 0
+        average_execution_score = 0
+        average_combined_score = 0
     
     summary = {
+        "timestamp": timestamp,
         "total_queries": len(test_data),
         "successful_queries": successful_tests,
-        "average_accuracy": average_accuracy,
+        "average_structure_score": average_structure_score,
+        "average_execution_score": average_execution_score,
+        "average_combined_score": average_combined_score,
+        "total_elapsed_time": batch_elapsed_time,
         "results": results
     }
     
-    with open(results_file, 'w', encoding='utf-8') as f:
+    # Save final results
+    final_file = results_dir / f"spider_results_{timestamp}_final.json"
+    with open(final_file, 'w', encoding='utf-8') as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     
-    print(f"\n测试完成!")
-    print(f"总查询数: {len(test_data)}")
-    print(f"成功查询数: {successful_tests}")
-    print(f"平均准确率: {average_accuracy:.4f}")
-    print(f"详细结果已保存至: {results_file}")
+    # Print summary
+    print(f"\nBatch Test Summary:")
+    print(f"Total Queries: {len(test_data)}")
+    print(f"Successful Queries: {successful_tests}")
+    print(f"Average Structure Score: {average_structure_score:.4f}")
+    print(f"Average Execution Score: {average_execution_score:.4f}")
+    print(f"Average Combined Score: {average_combined_score:.4f}")
+    print(f"Total Time: {batch_elapsed_time:.2f} seconds")
+    print(f"Results saved to: {final_file}")
     
     return summary
-
-def kickoff(dataset_path=None, dataset_type="default"):
-    """
-    启动查询流程
-    
-    Args:
-        dataset_path (str, optional): 数据集路径. Defaults to None.
-        dataset_type (str, optional): 数据集类型 ("spider", "custom", "default"). Defaults to "default".
-    """
-    try:
-        # 检查数据集路径
-        if dataset_path and os.path.exists(dataset_path):
-            logger.info(f'使用{dataset_type}数据集路径: {dataset_path}')
-        else:
-            logger.warning(f'{dataset_type}数据集路径无效或未提供，将使用默认查询')
-            dataset_path = None
-        
-        query_flow = QueryFlow(dataset_path=dataset_path, dataset_type=dataset_type)
-        result = query_flow.kickoff()
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_data = {
-            "timestamp": timestamp,
-            "state": query_flow.state.model_dump(),
-        }
-        
-        # 保存结果
-        output_dir = Path("outputs")
-        output_dir.mkdir(exist_ok=True)
-        
-        with open(output_dir / f"final_result_{timestamp}.json", "w", encoding="utf-8") as f:
-            json.dump(output_data, f, ensure_ascii=False, indent=2)
-            
-        logger.info("Query flow completed successfully")
-        
-        if query_flow.state.sql_query:
-            print("\n生成的SQL查询:")
-            print("-" * 50)
-            print(query_flow.state.sql_query)
-            print("-" * 50)
-            
-        return result
-            
-    except Exception as e:
-        logger.error(f"Error in query flow: {str(e)}")
-        raise
-    finally:
-        if 'query_flow' in locals() and hasattr(query_flow, 'cleanup_crews'):
-            query_flow.cleanup_crews()

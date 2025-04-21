@@ -1,0 +1,8 @@
+2025-04-21 21:26:24,592 - __main__ - INFO - Spider dataset path found: /root/autodl-tmp/spider_data
+2025-04-21 21:26:26,138 - httpx - INFO - HTTP Request: GET https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json "HTTP/1.1 200 OK"
+2025-04-21 21:26:26,922 - __main__ - ERROR - An error occurred: cannot import name 'kickoff' from 'multi.main' (/root/multi/src/multi/main.py)
+2025-04-21 21:26:26,922 - __main__ - ERROR - Traceback (most recent call last):
+  File "/root/multi/run.py", line 115, in main
+    from multi.main import kickoff
+ImportError: cannot import name 'kickoff' from 'multi.main' (/root/multi/src/multi/main.py)
+
