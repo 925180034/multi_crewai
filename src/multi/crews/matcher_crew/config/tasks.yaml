@@ -12,3 +12,4 @@ match_schemas:
     2. Attribute mappings
     3. Relationship types
     4. Data transformation suggestions
+  agent: schema_matcher

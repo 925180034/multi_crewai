@@ -1,26 +1,10 @@
-search_database:
+generate_sql:
   description: >
-    Search for database information based on the query and plan.
+    Generate an accurate SQL query based on the provided information.
+    Database Schema: {db_schema}
+    Database ID: {db_id}
     Query: {query}
-    Plan: {plan}
+    Schema Mapping: {schema_matches}
   expected_output: >
-    Detailed information about the database structure, relationships, and data.
-  agent: database_agent  # Added this line to explicitly specify the agent used
-
-search_web:
-  description: >
-    Search the web for relevant information based on the query and plan.
-    Query: {query}
-    Plan: {plan}
-  expected_output: >
-    A summary of web information related to the query.
-  agent: web_agent  # Added this line to explicitly specify the agent used
-
-search_documents:
-  description: >
-    Search for query-related information in documents.
-    Query: {query}
-    Plan: {plan}
-  expected_output: >
-    Structured information extracted from the documents.
-  agent: document_agent  # Added this line to explicitly specify the agent used
+    An accurate SQL query that correctly answers the user's question.
+  agent: sql_generator_agent

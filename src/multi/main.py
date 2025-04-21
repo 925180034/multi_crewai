@@ -10,6 +10,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
+
 from crewai.flow.flow import Flow, listen, start
 
 from multi.crews.planner_crew.planner_crew import PlannerCrew
@@ -23,7 +24,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
+# litellm.set_verbose = True
 class QueryState(BaseModel):
     """查询状态模型，增强版"""
     query: str = ""
