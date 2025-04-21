@@ -13,11 +13,17 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=ResourceWarning)
+
+# 创建输出目录
+output_dir = Path("outputs")
+output_dir.mkdir(exist_ok=True)
+
+# 修改日志配置
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("run_log.txt"),
+        logging.FileHandler(output_dir / "run_log.txt"),
         logging.StreamHandler()
     ]
 )
@@ -117,36 +123,43 @@ def main():
             logger.info(f"Running single query with dataset type: {args.dataset_type}")
             result = kickoff(dataset_path=dataset_path, dataset_type=args.dataset_type)
             
-            # Print results
-            if hasattr(result, 'state') and hasattr(result.state, 'sql_query'):
-                sql_query = result.state.sql_query
-                print("\nGenerated SQL Query:")
-                print("=" * 80)
-                print(sql_query)
-                print("=" * 80)
-                
-                # Print evaluation if gold SQL is available
-                if hasattr(result.state, 'gold_sql') and result.state.gold_sql:
-                    from multi.main import evaluate_sql
-                    
-                    if not args.skip_evaluation:
-                        # Construct database path
-                        db_path = None
-                        if dataset_path and result.state.db_id:
-                            potential_db_path = os.path.join(
-                                dataset_path, 'database', result.state.db_id, f"{result.state.db_id}.sqlite"
-                            )
-                            if os.path.exists(potential_db_path):
-                                db_path = potential_db_path
-                        
-                        # Evaluate SQL
-                        evaluation = evaluate_sql(sql_query, result.state.gold_sql, db_path)
-                        
-                        print("\nSQL Evaluation:")
-                        print(f"Structure Score: {evaluation['structure_score']:.2f}")
-                        print(f"Execution Score: {evaluation['execution_score']:.2f}")
-                        print(f"Combined Score: {evaluation['combined_score']:.2f}")
-                        print("=" * 80)
+            # 在打印结果之后添加保存逻辑
+        if hasattr(result, 'state') and hasattr(result.state, 'sql_query'):
+            sql_query = result.state.sql_query
+            
+            # 打印结果部分保持不变
+            print("\nGenerated SQL Query:")
+            print("=" * 80)
+            print(sql_query)
+            print("=" * 80)
+            
+            # 添加：保存结果到文件
+            from datetime import datetime
+            
+            output_dir = Path("outputs/single_queries")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 构建结果数据
+            result_data = {
+                "timestamp": timestamp,
+                "query": result.state.query if hasattr(result.state, 'query') else "",
+                "db_id": result.state.db_id if hasattr(result.state, 'db_id') else "",
+                "sql_query": sql_query,
+                "gold_sql": result.state.gold_sql if hasattr(result.state, 'gold_sql') else ""
+            }
+            
+            # 如果有评估结果，也添加到数据中
+            if 'evaluation' in locals():
+                result_data["evaluation"] = evaluation
+            
+            # 保存到文件
+            output_file = output_dir / f"query_result_{timestamp}.json"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(result_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n结果已保存到: {output_file}")
         else:
             # Import here to avoid circular imports
             from multi.main import batch_test_spider

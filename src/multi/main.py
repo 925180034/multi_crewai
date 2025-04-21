@@ -370,6 +370,37 @@ class QueryFlow(Flow[QueryState]):
             self.state.status = "error"
             self.state.execution_end = datetime.now()
 
+        # 在SQL生成成功后保存结果
+        if self.state.status == "completed":
+            try:
+                # 确保输出目录存在
+                result_dir = self.output_dir / "flow_results"
+                result_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 构建结果数据
+                result_data = {
+                    "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                    "query": self.state.query,
+                    "plan": self.state.plan,
+                    "db_data": self.state.db_data,
+                    "web_data": self.state.web_data,
+                    "doc_data": self.state.doc_data,
+                    "schema_matches": self.state.schema_matches,
+                    "sql_query": self.state.sql_query,
+                    "db_id": self.state.db_id if hasattr(self.state, 'db_id') else "",
+                    "gold_sql": self.state.gold_sql if hasattr(self.state, 'gold_sql') else "",
+                    "execution_time": (self.state.execution_end - self.state.execution_start).total_seconds() if self.state.execution_end else 0
+                }
+                
+                # 保存到文件
+                output_file = result_dir / f"flow_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(result_data, f, ensure_ascii=False, indent=2)
+                
+                logger.info(f"流程结果已保存到: {output_file}")
+            except Exception as e:
+                logger.error(f"保存流程结果失败: {str(e)}")
+
     def _extract_sql_query(self, raw_output):
         """Extract clean SQL query from raw output text"""
         # Search for SQL enclosed in triple backticks
@@ -845,3 +876,8 @@ def batch_test_spider(spider_dataset_path, limit=10, start_index=0):
     print(f"Results saved to: {final_file}")
     
     return summary
+
+def kickoff(dataset_path=None, dataset_type="default"):
+    """Entry point for single query processing"""
+    query_flow = QueryFlow(dataset_path=dataset_path, dataset_type=dataset_type)
+    return query_flow.kickoff()
